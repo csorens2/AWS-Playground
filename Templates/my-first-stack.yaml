@@ -1,0 +1,13 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: My First Cloudformation Template
+
+Resources:
+  MyS3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "my-unique-bucket-${AWS::AccountId}"
+
+Outputs:
+  BucketName:
+    Value: !Ref MyS3Bucket
+    Description: Name of the created S3 bucket
