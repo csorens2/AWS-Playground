@@ -1,11 +1,3 @@
-# Banking App
-
-This is a project to build a basic banking app
-
-## Tech Stack
-
-Transaction Generation Lambda: TypeScript
-
 ## Useful commands
 
 * `npm run build`   compile typescript to js

@@ -30,7 +30,8 @@ export const handler = async (event: GenerationOrder, context: Context) : Promis
     for(let i: number = 0; i < event.transaction_count; i++) {
         const nextTransaction: Transaction = {
             AccountNumber: randomAccountNumber(),
-            Amount: Number(fakerInstance.finance.amount( {min: 1, max: 10}))
+            Amount: Number(fakerInstance.finance.amount( {min: 1, max: 10})),
+            Initializing: false
         }
 
         const command = new PutEventsCommand({
