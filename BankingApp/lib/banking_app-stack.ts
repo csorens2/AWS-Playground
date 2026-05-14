@@ -14,9 +14,9 @@ export class BankingAppStack extends cdk.Stack {
       eventBusName: 'Transaction-Bus',
     });
 
-    const generatorFunction = new lambda.DockerImageFunction(this, 'TransactionGenerator', {
-      functionName: 'TransactionGenerator',
-      code: lambda.DockerImageCode.fromImageAsset('./transaction-generator'),
+    const generatorFunction = new lambda.DockerImageFunction(this, 'BankEventGenerator', {
+      functionName: 'BankEventGenerator',
+      code: lambda.DockerImageCode.fromImageAsset('./bank-event-generator'),
       environment: {
         EVENTBRIDGE_NAME: transactionBus.eventBusName
       },

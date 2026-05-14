@@ -1,5 +1,5 @@
 {
-  "name": "transaction-processor",
+  "name": "bank-event-processor",
   "version": "1.0.0",
   "description": "",
   "license": "ISC",

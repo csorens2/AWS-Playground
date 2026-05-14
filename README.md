@@ -9,9 +9,9 @@ This repo contains a series of projects created to learn how to use the AWS CDK 
 
 CDK Stack: TypeScript
 
-Transaction Generator: TypeScript
+Bank Event Generator: TypeScript
 
-Transaction Processor: TypeScript
+Bank Event Processor: TypeScript
 
 Transaction Ledger: Amazon Aurora MySQL
 
