@@ -5,14 +5,16 @@ import { Context } from 'aws-lambda'
 
 type GenerationOrder = {
     num_unique_accounts: number
+    starting_balance: number
     transaction_count: number
 }
 
 export const handler = async (event: GenerationOrder, context: Context) : Promise<string> => {
 
-    console.log("Hello World from Lambda")
+    console.log("Hello World from the Generation Lambda")
 
     const eventBridgeName = process.env.EVENTBRIDGE_NAME
+    const eventBridgeClient = new EventBridgeClient({})
 
     const accountNumberLength = 10;
     const fakerInstance = fakerEN;
@@ -22,10 +24,11 @@ export const handler = async (event: GenerationOrder, context: Context) : Promis
         accountNumbersSet.add(fakerInstance.finance.accountNumber(accountNumberLength))
     }
 
+
     const accountNumbersArray = Array.from(accountNumbersSet)
     const randomAccountNumber = (): string => accountNumbersArray[Math.floor(Math.random() * accountNumbersArray.length)]
 
-    const eventBridgeClient = new EventBridgeClient({})
+
 
     for(let i: number = 0; i < event.transaction_count; i++) {
         const nextTransaction: Transaction = {
@@ -37,7 +40,6 @@ export const handler = async (event: GenerationOrder, context: Context) : Promis
         const command = new PutEventsCommand({
             Entries: [
                 {
-                    // Use the bus name/ARN you created or 'default'
                     EventBusName: eventBridgeName,
                     Source: context.functionName,
                     DetailType: 'Transaction',

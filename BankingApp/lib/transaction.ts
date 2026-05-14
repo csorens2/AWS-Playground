@@ -1,6 +1,7 @@
 
 export type Transaction = {
-    AccountNumber: string
+    DebitAccountNumber: string
+    CreditAccountNumber: string
     Amount: number
     Initializing: boolean
 }

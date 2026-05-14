@@ -3,6 +3,22 @@
 ## Overview
 This repo contains a series of projects created to learn how to use the AWS CDK and other AWS technologies
 
+### Banking App (Under Construction)
+
+#### Tech Stack:
+
+CDK Stack: TypeScript
+
+Transaction Generator: TypeScript
+
+Transaction Processor: TypeScript
+
+Transaction Ledger: Amazon Aurora MySQL
+
+Account Status: Amazon Dynamodb
+
+![BankingAppDiagram](BankingApp/Diagram/AppDiagram.png)
+
 ### HelloWorldCDK
 
 A project to learn the basics of creating CDK stacks and lambda handlers
@@ -15,16 +31,8 @@ Lambda: Go, Docker
 
 ![CDKDiagram](HelloWorldCDK/Diagram/HelloWorldDiagram.png)
 
-### Banking App (Under Construction)
+### Future Project Ideas
 
-#### Tech Stack:
-
-CDK Stack: TypeScript
-
-Transaction Generator: TypeScript
-
-Transaction Record: Amazon Aurora
-
-Account Status: Amazon Dynamodb
-
-![BankingAppDiagram](BankingApp/Diagram/AppDiagram.png)
+* WebAPI
+* EC2 and High Performance Computing
+* Disaster Recovery with Chaos Monkey

@@ -11,7 +11,7 @@ export class BankingAppStack extends cdk.Stack {
     super(scope, id, props);
 
     const transactionBus = new events.EventBus(this, 'TransactionBus', {
-      eventBusName: 'Transaction-Bus'
+      eventBusName: 'Transaction-Bus',
     });
 
     const generatorFunction = new lambda.DockerImageFunction(this, 'TransactionGenerator', {
@@ -25,7 +25,6 @@ export class BankingAppStack extends cdk.Stack {
     transactionBus.grantPutEventsTo(generatorFunction)
 
     const transactionDLQ = new sqs.Queue(this, 'TransactionDLQ', {
-      fifo: true,
       queueName: 'TransactionDLQ',
     })
     const transactionSQS = new sqs.Queue(this, 'TransactionQueue', {
