@@ -1,6 +1,6 @@
 import { fakerEN } from '@faker-js/faker';
-import { TransactionEvent, TransactionEventDetailType } from "../lib/transactionEvent";
-import { InitializationEvent, InitializationEventDetailType} from "../lib/initializationEvent"
+import { TransactionEvent, TransactionEventDetailType } from "../shared/transactionEvent";
+import { InitializationEvent, InitializationEventDetailType} from "../shared/initializationEvent";
 import { EventBridgeClient, PutEventsCommand } from '@aws-sdk/client-eventbridge';
 import { Context } from 'aws-lambda'
 
@@ -74,7 +74,7 @@ export const handler = async (event: GenerationOrder, context: Context) : Promis
                 {
                     EventBusName: eventBridgeName,
                     Source: context.functionName,
-                    DetailType: InitializationEventDetailType,
+                    DetailType: TransactionEventDetailType,
                     Detail: JSON.stringify(nextTransaction),
                 },
             ],

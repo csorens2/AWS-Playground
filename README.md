@@ -36,3 +36,6 @@ Lambda: Go, Docker
 * WebAPI
 * EC2 and High Performance Computing
 * Disaster Recovery with Chaos Monkey
+* Docker Project
+* Kubernetes Project
+* Multi-Stack Project
