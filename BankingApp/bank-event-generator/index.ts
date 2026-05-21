@@ -1,6 +1,4 @@
 import { fakerEN } from '@faker-js/faker';
-import { TransactionEvent, TransactionEventDetailType } from "../shared/transactionEvent";
-import { InitializationEvent, InitializationEventDetailType} from "../shared/initializationEvent";
 import { EventBridgeClient, PutEventsCommand } from '@aws-sdk/client-eventbridge';
 import { Context } from 'aws-lambda'
 
@@ -16,6 +14,18 @@ export const handler = async (event: GenerationOrder, context: Context) : Promis
 
     console.log("Hello World from the Bank Event Generator")
 
+    const initializationEventDetailType = process.env.INITIALIZATION_EVENT_DETAIL_TYPE
+    if (initializationEventDetailType == undefined) {
+        console.log("INITIALIZATION_EVENT_DETAIL_TYPE must be set")
+        return "Failed"
+    }
+
+    const transactionEventDetailType = process.env.TRANSACTION_EVENT_DETAIL_TYPE
+    if (transactionEventDetailType == undefined) {
+        console.log("TRANSACTION_EVENT_DETAIL_TYPE must be set")
+        return "Failed"
+    }
+
     const eventBridgeName = process.env.EVENTBRIDGE_NAME
     const eventBridgeClient = new EventBridgeClient({})
 
@@ -27,17 +37,15 @@ export const handler = async (event: GenerationOrder, context: Context) : Promis
     }
 
     for (const accountNumber of accountNumbersSet) {
-        const nextInitialization: InitializationEvent = {
-            AccountNumber: accountNumber,
-            Amount: event.starting_balance
+        const nextInitialization = {
+            AccountNumber: accountNumber, Amount: event.starting_balance
         }
-
         const command = new PutEventsCommand({
             Entries: [
                 {
                     EventBusName: eventBridgeName,
                     Source: context.functionName,
-                    DetailType: InitializationEventDetailType,
+                    DetailType:  initializationEventDetailType,
                     Detail: JSON.stringify(nextInitialization),
                 }
             ]
@@ -63,7 +71,7 @@ export const handler = async (event: GenerationOrder, context: Context) : Promis
             creditAccountNumber = randomAccountNumber();
         } while (debitAccountNumber == creditAccountNumber)
 
-        const nextTransaction: TransactionEvent = {
+        const nextTransaction = {
             DebitAccountNumber: debitAccountNumber,
             CreditAccountNumber: creditAccountNumber,
             Amount: Number(fakerInstance.finance.amount( {min: 1, max: event.starting_balance})),
@@ -74,7 +82,7 @@ export const handler = async (event: GenerationOrder, context: Context) : Promis
                 {
                     EventBusName: eventBridgeName,
                     Source: context.functionName,
-                    DetailType: TransactionEventDetailType,
+                    DetailType: transactionEventDetailType,
                     Detail: JSON.stringify(nextTransaction),
                 },
             ],

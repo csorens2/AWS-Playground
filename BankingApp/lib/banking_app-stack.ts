@@ -5,26 +5,35 @@ import * as events from 'aws-cdk-lib/aws-events';
 import * as sqs from 'aws-cdk-lib/aws-sqs'
 import * as targets from 'aws-cdk-lib/aws-events-targets';
 import {Duration} from "aws-cdk-lib/core";
-import {TransactionEventDetailType} from "../shared/transactionEvent";
-import {InitializationEventDetailType} from "../shared/initializationEvent";
 
 export class BankingAppStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
 
-    const bankEventBus = new events.EventBus(this, 'BankEventBus', {});
+    const transactionEventDetailType = "Transaction Event"
+    const initializationEventDetailType = "Initialization Event"
+
+    const eventBusDLQ = new sqs.Queue(this, 'EventBusDLQ', {})
+    const bankEventBus = new events.EventBus(this, 'BankEventBus', {
+      deadLetterQueue: eventBusDLQ
+    });
 
     const generatorFunction = new lambda.DockerImageFunction(this, 'BankEventGenerator', {
       code: lambda.DockerImageCode.fromImageAsset('./bank-event-generator'),
       environment: {
+        INITIALIZATION_EVENT_DETAIL_TYPE: initializationEventDetailType,
+        TRANSACTION_EVENT_DETAIL_TYPE: transactionEventDetailType,
         EVENTBRIDGE_NAME: bankEventBus.eventBusName
       },
       timeout: Duration.minutes(15)
     })
     bankEventBus.grantPutEventsTo(generatorFunction)
 
-    const eventDLQ = new sqs.Queue(this, 'EventDLQ', {})
+    const eventDLQ = new sqs.Queue(this, 'EventDLQ', {
+      fifo: true
+    })
     const transactionSQS = new sqs.Queue(this, 'TransactionQueue', {
+      contentBasedDeduplication: true,
       fifo: true,
       visibilityTimeout: Duration.minutes(5),
       deadLetterQueue: {
@@ -33,6 +42,7 @@ export class BankingAppStack extends cdk.Stack {
       }
     })
     const initializationSQS = new sqs.Queue(this, 'InitializationQueue', {
+      contentBasedDeduplication: true,
       fifo: true,
       visibilityTimeout: Duration.minutes(5),
       deadLetterQueue: {
@@ -44,17 +54,25 @@ export class BankingAppStack extends cdk.Stack {
     const busToInitializationRule = new events.Rule(this, 'BusToInitializationRule', {
       eventBus: bankEventBus,
       eventPattern: {
-        detailType: [InitializationEventDetailType]
+        detailType: [initializationEventDetailType]
       }
     });
-    busToInitializationRule.addTarget(new targets.SqsQueue(initializationSQS))
+    busToInitializationRule.addTarget(new targets.SqsQueue(initializationSQS, {
+      deadLetterQueue: eventBusDLQ,
+      messageGroupId: bankEventBus.eventBusName,
+      retryAttempts: 0
+    }))
 
     const busToTransactionRule = new events.Rule(this, 'BusToTransactionRule', {
       eventBus: bankEventBus,
       eventPattern: {
-        detailType: [TransactionEventDetailType]
+        detailType: [transactionEventDetailType]
       }
     });
-    busToTransactionRule.addTarget(new targets.SqsQueue(transactionSQS))
+    busToTransactionRule.addTarget(new targets.SqsQueue(transactionSQS, {
+      deadLetterQueue: eventBusDLQ,
+      retryAttempts: 0,
+      messageGroupId: bankEventBus.eventBusName
+    }))
   }
 }
