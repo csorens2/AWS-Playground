@@ -1,9 +1,11 @@
-FROM golang:1.26.2 as build
-WORKDIR /lambda
+FROM golang:1.26.2 AS build
+WORKDIR /bank-event-processor
+
 COPY go.mod go.sum ./
-COPY main.go .
+COPY main.go ./
+
 RUN go build -tags lambda.norpc -o main main.go
 
 FROM public.ecr.aws/lambda/provided:al2023
-COPY --from=build /lambda/main ./main
+COPY --from=build /bank-event-processor/main ./main
 ENTRYPOINT [ "./main" ]

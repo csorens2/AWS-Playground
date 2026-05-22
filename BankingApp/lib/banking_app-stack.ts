@@ -74,5 +74,14 @@ export class BankingAppStack extends cdk.Stack {
       retryAttempts: 0,
       messageGroupId: bankEventBus.eventBusName
     }))
+
+    const bankEventProcessorFunction = new lambda.DockerImageFunction(this, 'BankEventProcessor', {
+      code: lambda.DockerImageCode.fromImageAsset('./bank-event-processor'),
+      environment: {
+
+      },
+      reservedConcurrentExecutions: 1,
+      timeout: Duration.minutes(15)
+    })
   }
 }

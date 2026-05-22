@@ -11,7 +11,7 @@ CDK Stack: TypeScript
 
 Bank Event Generator: TypeScript
 
-Bank Event Processor: TypeScript
+Bank Event Processor: Go
 
 Transaction Ledger: Amazon Aurora MySQL
 
@@ -36,6 +36,5 @@ Lambda: Go, Docker
 * WebAPI
 * EC2 and High Performance Computing
 * Disaster Recovery with Chaos Monkey
-* Docker Project
-* Kubernetes Project
+* Container Management Project
 * Multi-Stack Project
