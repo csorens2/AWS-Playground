@@ -4,6 +4,7 @@ import * as lambda from 'aws-cdk-lib/aws-lambda'
 import * as events from 'aws-cdk-lib/aws-events';
 import * as sqs from 'aws-cdk-lib/aws-sqs'
 import * as targets from 'aws-cdk-lib/aws-events-targets';
+import * as lambdaEventSources from 'aws-cdk-lib/aws-lambda-event-sources';
 import {Duration} from "aws-cdk-lib/core";
 
 export class BankingAppStack extends cdk.Stack {
@@ -78,10 +79,20 @@ export class BankingAppStack extends cdk.Stack {
     const bankEventProcessorFunction = new lambda.DockerImageFunction(this, 'BankEventProcessor', {
       code: lambda.DockerImageCode.fromImageAsset('./bank-event-processor'),
       environment: {
-
+        INITIALIZATION_SQS_NAME: initializationSQS.queueName,
+        TRANSACTION_SQS_NAME: transactionSQS.queueName
       },
       reservedConcurrentExecutions: 1,
       timeout: Duration.minutes(15)
     })
+
+    bankEventProcessorFunction.addEventSource(new lambdaEventSources.SqsEventSource(initializationSQS, {
+      batchSize: 1,
+    }))
+    bankEventProcessorFunction.addEventSource(new lambdaEventSources.SqsEventSource(transactionSQS, {
+      batchSize: 1,
+    }))
+    //initializationSQS.grantConsumeMessages(bankEventProcessorFunction)
+    //transactionSQS.grantConsumeMessages(bankEventProcessorFunction)
   }
 }

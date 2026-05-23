@@ -38,7 +38,8 @@ export const handler = async (event: GenerationOrder, context: Context) : Promis
 
     for (const accountNumber of accountNumbersSet) {
         const nextInitialization = {
-            AccountNumber: accountNumber, Amount: event.starting_balance
+            AccountNumber: accountNumber,
+            Amount: event.starting_balance
         }
         const command = new PutEventsCommand({
             Entries: [
