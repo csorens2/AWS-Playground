@@ -3,14 +3,17 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"os"
+	"strconv"
 
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
+	"github.com/aws/aws-sdk-go-v2/service/sqs/types"
 )
 
 type InitializationMessage struct {
@@ -32,7 +35,8 @@ type SQSMessage struct {
 var (
 	initialization_queue_URL *string
 	transaction_queue_URL    *string
-	SQSClient                *sqs.Client
+
+	SQSClient *sqs.Client
 )
 
 func getSQSURL(envVarName string) *string {
@@ -68,6 +72,29 @@ func handleInitialization(ctx context.Context, message SQSMessage) error {
 }
 
 func handleTransaction(ctx context.Context, message SQSMessage) error {
+
+	// Check if the initialization queue has any messages first
+	result, err := SQSClient.GetQueueAttributes(ctx, &sqs.GetQueueAttributesInput{
+		QueueUrl: initialization_queue_URL,
+		AttributeNames: []types.QueueAttributeName{
+			types.QueueAttributeNameApproximateNumberOfMessages,
+		},
+	})
+
+	numMessagesStr := result.Attributes[string(types.QueueAttributeNameApproximateNumberOfMessages)]
+	if numMessagesStr == "" {
+		log.Fatal("Unable to get number of messages on initialization queue")
+	}
+
+	numMessages, err := strconv.Atoi(numMessagesStr)
+	if err != nil {
+		log.Fatalf("unable to parse num messages: '%s'", numMessagesStr)
+	}
+
+	if numMessages > 0 {
+		return fmt.Errorf("returning message to queue. '%d' messages on initialization queue take priority", numMessages)
+	}
+
 	return nil
 }
 

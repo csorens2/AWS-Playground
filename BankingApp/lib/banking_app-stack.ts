@@ -1,11 +1,15 @@
 import * as cdk from 'aws-cdk-lib/core';
-import { Construct } from 'constructs';
+import {Duration} from 'aws-cdk-lib/core';
+import {Construct} from 'constructs';
 import * as lambda from 'aws-cdk-lib/aws-lambda'
 import * as events from 'aws-cdk-lib/aws-events';
 import * as sqs from 'aws-cdk-lib/aws-sqs'
 import * as targets from 'aws-cdk-lib/aws-events-targets';
 import * as lambdaEventSources from 'aws-cdk-lib/aws-lambda-event-sources';
-import {Duration} from "aws-cdk-lib/core";
+import * as ec2 from 'aws-cdk-lib/aws-ec2';
+import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
+import {AttributeType} from 'aws-cdk-lib/aws-dynamodb';
+import * as rds from 'aws-cdk-lib/aws-rds';
 
 export class BankingAppStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
@@ -76,7 +80,24 @@ export class BankingAppStack extends cdk.Stack {
       messageGroupId: bankEventBus.eventBusName
     }))
 
+    const processorVPC = new ec2.Vpc(this, 'ProcessorVPC', {
+      ipAddresses: ec2.IpAddresses.cidr('10.0.0.0/16'),
+      maxAzs: 3,
+      natGateways: 1,
+      subnetConfiguration: [
+        {
+          cidrMask: 24,
+          name: 'Private',
+          subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS
+        }
+      ]
+    })
+
     const bankEventProcessorFunction = new lambda.DockerImageFunction(this, 'BankEventProcessor', {
+      vpc: processorVPC,
+      vpcSubnets: {
+        subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS,
+      },
       code: lambda.DockerImageCode.fromImageAsset('./bank-event-processor'),
       environment: {
         INITIALIZATION_SQS_NAME: initializationSQS.queueName,
@@ -94,5 +115,34 @@ export class BankingAppStack extends cdk.Stack {
     }))
     //initializationSQS.grantConsumeMessages(bankEventProcessorFunction)
     //transactionSQS.grantConsumeMessages(bankEventProcessorFunction)
+
+
+    const transactionLedgerDatabase = new rds.DatabaseCluster(this, 'MyAuroraCluster', {
+      engine: rds.DatabaseClusterEngine.auroraMysql({
+        version: rds.AuroraMysqlEngineVersion.VER_3_12_0,
+      }),
+      vpc: processorVPC,
+      vpcSubnets: {
+        subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS,
+      },
+      credentials: rds.Credentials.fromGeneratedSecret('TransactionLedgerAdminUser'),
+      defaultDatabaseName: 'Transactions',
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+    });
+
+    transactionLedgerDatabase.connections.allowFrom(bankEventProcessorFunction, ec2.Port.tcp(3306))
+
+
+    const accountStateTable = new dynamodb.Table(this, 'MyDynamoTable', {
+      partitionKey: { name: 'id', type: dynamodb.AttributeType.STRING },
+      removalPolicy: cdk.RemovalPolicy.DESTROY, // for dev only
+    });
+
+    processorVPC.addGatewayEndpoint('AccountStateEndpoint', {
+      service: ec2.GatewayVpcEndpointAwsService.DYNAMODB,
+    });
+
+    accountStateTable.grantReadWriteData(bankEventProcessorFunction);
+
   }
 }
