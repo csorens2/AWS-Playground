@@ -10,6 +10,9 @@ import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import {AttributeType} from 'aws-cdk-lib/aws-dynamodb';
 import * as rds from 'aws-cdk-lib/aws-rds';
+import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager'
+import * as iam from 'aws-cdk-lib/aws-iam'
+import {CfnDBProxy, CfnDBProxyTargetGroup} from "aws-cdk-lib/aws-rds";
 
 export class BankingAppStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
@@ -80,17 +83,68 @@ export class BankingAppStack extends cdk.Stack {
       messageGroupId: bankEventBus.eventBusName
     }))
 
+    /**
+     * Start for Processor VPC
+     */
+
     const processorVPC = new ec2.Vpc(this, 'ProcessorVPC', {
       ipAddresses: ec2.IpAddresses.cidr('10.0.0.0/16'),
-      maxAzs: 3,
-      natGateways: 1,
       subnetConfiguration: [
         {
-          cidrMask: 24,
+          name: 'Public',
+          subnetType: ec2.SubnetType.PUBLIC
+        },
+        {
           name: 'Private',
           subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS
+        },
+        {
+          name: 'Isolated',
+          subnetType: ec2.SubnetType.PRIVATE_ISOLATED
         }
       ]
+    })
+
+    const transactionLedgerDBName = 'transactionDB'
+    const transactionLedgerDatabase = new rds.DatabaseCluster(this, 'TransactionLedger', {
+      engine: rds.DatabaseClusterEngine.auroraMysql({
+        version: rds.AuroraMysqlEngineVersion.VER_3_12_0,
+      }),
+      vpc: processorVPC,
+      vpcSubnets: {
+        subnetType: ec2.SubnetType.PRIVATE_ISOLATED
+      },
+      iamAuthentication: true,
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+      writer: rds.ClusterInstance.serverlessV2('writer'),
+      readers: [rds.ClusterInstance.serverlessV2('reader')],
+      defaultDatabaseName: transactionLedgerDBName
+    });
+
+    const dbUser = 'user'
+    const proxyRole = new iam.Role(this, 'RDSProxyRole', {
+      assumedBy: new iam.ServicePrincipal('rds.amazonaws.com')
+    })
+    transactionLedgerDatabase.grantConnect(proxyRole, dbUser)
+
+    const proxySG = new ec2.SecurityGroup(this, 'ProxySG', {
+      vpc: processorVPC,
+      allowAllOutbound: true
+    })
+
+    const rdsProxy = new CfnDBProxy(this, 'TransactionLedgerProxy', {
+      dbProxyName: 'transaction-ledger-proxy',
+      roleArn: proxyRole.roleArn,
+      engineFamily: 'MYSQL',
+      vpcSubnetIds: processorVPC.privateSubnets.map(s => s.subnetId),
+      vpcSecurityGroupIds: [proxySG.securityGroupId],
+      defaultAuthScheme: 'IAM_AUTH',
+    })
+
+    new CfnDBProxyTargetGroup(this, 'ProxyTargetGroup', {
+      dbProxyName: rdsProxy.dbProxyName,
+      targetGroupName: 'default',
+      dbClusterIdentifiers: [transactionLedgerDatabase.clusterIdentifier]
     })
 
     const bankEventProcessorFunction = new lambda.DockerImageFunction(this, 'BankEventProcessor', {
@@ -101,10 +155,13 @@ export class BankingAppStack extends cdk.Stack {
       code: lambda.DockerImageCode.fromImageAsset('./bank-event-processor'),
       environment: {
         INITIALIZATION_SQS_NAME: initializationSQS.queueName,
-        TRANSACTION_SQS_NAME: transactionSQS.queueName
+        TRANSACTION_SQS_NAME: transactionSQS.queueName,
+        DB_USER: dbUser,
+        DB_NAME: transactionLedgerDBName,
+        PROXY_ENDPOINT: rdsProxy.attrEndpoint
       },
       reservedConcurrentExecutions: 1,
-      timeout: Duration.minutes(15)
+      timeout: Duration.minutes(15),
     })
 
     bankEventProcessorFunction.addEventSource(new lambdaEventSources.SqsEventSource(initializationSQS, {
@@ -116,23 +173,7 @@ export class BankingAppStack extends cdk.Stack {
     //initializationSQS.grantConsumeMessages(bankEventProcessorFunction)
     //transactionSQS.grantConsumeMessages(bankEventProcessorFunction)
 
-
-    const transactionLedgerDatabase = new rds.DatabaseCluster(this, 'MyAuroraCluster', {
-      engine: rds.DatabaseClusterEngine.auroraMysql({
-        version: rds.AuroraMysqlEngineVersion.VER_3_12_0,
-      }),
-      vpc: processorVPC,
-      vpcSubnets: {
-        subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS,
-      },
-      credentials: rds.Credentials.fromGeneratedSecret('TransactionLedgerAdminUser'),
-      defaultDatabaseName: 'Transactions',
-      removalPolicy: cdk.RemovalPolicy.DESTROY,
-    });
-
-    transactionLedgerDatabase.connections.allowFrom(bankEventProcessorFunction, ec2.Port.tcp(3306))
-
-
+    /*
     const accountStateTable = new dynamodb.Table(this, 'MyDynamoTable', {
       partitionKey: { name: 'id', type: dynamodb.AttributeType.STRING },
       removalPolicy: cdk.RemovalPolicy.DESTROY, // for dev only
@@ -143,6 +184,6 @@ export class BankingAppStack extends cdk.Stack {
     });
 
     accountStateTable.grantReadWriteData(bankEventProcessorFunction);
-
+    */
   }
 }

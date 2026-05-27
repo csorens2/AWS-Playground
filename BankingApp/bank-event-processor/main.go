@@ -121,6 +121,11 @@ func handler(ctx context.Context, event events.SQSEvent) error {
 	return nil
 }
 
+func testingHandler(ctx context.Context, event json.RawMessage) error {
+	log.Println("Hello World from the Lambda!")
+	return nil
+}
+
 func main() {
 	lambda.Start(handler)
 }
