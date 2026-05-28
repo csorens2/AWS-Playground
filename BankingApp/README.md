@@ -13,3 +13,5 @@
 `npm install`
 `npm run build:shared`
 `npm run build`
+
+`cdk deploy --hotswap true`

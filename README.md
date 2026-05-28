@@ -38,3 +38,4 @@ Lambda: Go, Docker
 * Disaster Recovery with Chaos Monkey
 * Container Management Project
 * Multi-Stack Project
+* CI/CD
