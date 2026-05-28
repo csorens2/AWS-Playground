@@ -127,5 +127,5 @@ func testingHandler(ctx context.Context, event json.RawMessage) error {
 }
 
 func main() {
-	lambda.Start(handler)
+	lambda.Start(testingHandler)
 }
