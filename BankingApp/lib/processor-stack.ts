@@ -17,10 +17,9 @@ export class BankingAppProcessorStack extends cdk.Stack {
     constructor(scope: Construct, id: string, props?: ProcessorProps) {
         super(scope, id, props)
 
+        const mySqlPort = 3306
+
         const processorVPC = new ec2.Vpc(this, 'ProcessorVPC', {
-            //ipAddresses: ec2.IpAddresses.cidr('10.0.0.0/16'),
-            //maxAzs: 3,
-            //natGateways: 1,
             subnetConfiguration: [
                 {
                     name: 'Public',
@@ -36,17 +35,6 @@ export class BankingAppProcessorStack extends cdk.Stack {
                 }
             ]
         })
-
-        const dbSecurityGroup = new ec2.SecurityGroup(this, 'Lambda-to-Proxy-SG', {
-            vpc: processorVPC,
-            allowAllOutbound: true
-        })
-
-        dbSecurityGroup.addIngressRule(
-            dbSecurityGroup,
-            ec2.Port.tcp(3306),
-            'Allow traffic from Lambda to RDS Proxy (same SG)'
-        );
 
         const transactionLedgerDBName = 'transactionDB'
         const transactionLedgerCredentialName = 'dbadmin'
@@ -65,9 +53,10 @@ export class BankingAppProcessorStack extends cdk.Stack {
             })],
 
             defaultDatabaseName: transactionLedgerDBName,
-            credentials: rds.Credentials.fromGeneratedSecret(transactionLedgerCredentialName),
+            credentials: rds.Credentials.fromGeneratedSecret(transactionLedgerCredentialName, {
 
-            securityGroups: [dbSecurityGroup]
+            }),
+
         });
 
         const transactionLedgerProxy = new rds.DatabaseProxy(this, 'TransactionLedgerProxy', {
@@ -77,18 +66,11 @@ export class BankingAppProcessorStack extends cdk.Stack {
                 subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS
             },
 
-            requireTLS: true,
             iamAuth: true,
             secrets: [transactionLedgerDatabase.secret!],
             clientPasswordAuthType: rds.ClientPasswordAuthType.MYSQL_NATIVE_PASSWORD,
             debugLogging: true,
-
-            securityGroups: [dbSecurityGroup],
         })
-
-        new cdk.CfnOutput(this, 'ClusterEndpoint', { value: transactionLedgerDatabase.clusterEndpoint.hostname });
-        new cdk.CfnOutput(this, 'ProxyEndpoint', { value: transactionLedgerProxy.endpoint });
-        new cdk.CfnOutput(this, 'SecretArn', { value: transactionLedgerDatabase.secret!.secretArn });
 
         const bankEventProcessorFunction = new lambda.DockerImageFunction(this, 'BankEventProcessor', {
             vpc: processorVPC,
@@ -101,19 +83,19 @@ export class BankingAppProcessorStack extends cdk.Stack {
                 TRANSACTION_SQS_NAME: props!.TransactionSQSName,
                 DB_NAME: transactionLedgerDBName,
 
-                // Should only need these 3
                 PROXY_ENDPOINT: transactionLedgerProxy.endpoint,
                 DATABASE_NAME: transactionLedgerDBName,
                 DATABASE_USER: transactionLedgerCredentialName,
-
-                CLUSTER_ENDPOINT: transactionLedgerDatabase.clusterEndpoint.hostname,
-                SECRET_ARN: transactionLedgerDatabase.secret!.secretArn,
             },
             //reservedConcurrentExecutions: 1,
             timeout: Duration.minutes(15),
-            securityGroups: [dbSecurityGroup],
         })
 
+        new cdk.CfnOutput(this, 'ClusterEndpoint', { value: transactionLedgerDatabase.clusterEndpoint.hostname });
+        new cdk.CfnOutput(this, 'ProxyEndpoint', { value: transactionLedgerProxy.endpoint });
+
+        transactionLedgerDatabase.connections.allowFrom(transactionLedgerProxy, ec2.Port.tcp(mySqlPort))
+        transactionLedgerProxy.connections.allowFrom(bankEventProcessorFunction, ec2.Port.tcp(mySqlPort))
         transactionLedgerProxy.grantConnect(bankEventProcessorFunction.role!, transactionLedgerCredentialName)
     }
 }
