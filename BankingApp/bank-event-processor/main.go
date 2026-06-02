@@ -14,6 +14,7 @@ import (
 	"github.com/aws/aws-lambda-go/lambda"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/feature/rds/auth"
+	_ "github.com/go-sql-driver/mysql"
 )
 
 func testingHandler(ctx context.Context, event json.RawMessage) error {
@@ -45,8 +46,10 @@ func testingHandler(ctx context.Context, event json.RawMessage) error {
 		return fmt.Errorf("failed to generate auth token: %w", err)
 	}
 
-	dsn := fmt.Sprintf("%s:%s@tcp(%s)/%s?tls=rds&allowCleartextPasswords=true&authPlugin=mysql_native_password",
+	dsn := fmt.Sprintf("%s:%s@tcp(%s)/%s?tls=true&allowCleartextPasswords=true&authPlugin=mysql_native_password",
 		databaseUser, token, dbEndpoint, databaseName)
+
+	//"%s:%s@tcp(%s)/%s?tls=true&allowCleartextPasswords=true&authPlugin=mysql_native_password"
 
 	db, err := sql.Open("mysql", dsn)
 	if err != nil {
@@ -68,14 +71,13 @@ func testingHandler(ctx context.Context, event json.RawMessage) error {
 		log.Printf("Ping error: %+v", err) // %+v often gives more context
 		log.Printf("Ping error string: %s", err.Error())
 
+		// Optional: unwrap for wrapped errors
 		if unwrapped := errors.Unwrap(err); unwrapped != nil {
 			log.Printf("Unwrapped error: %+v", unwrapped)
 		}
 
 		return fmt.Errorf("failed to ping RDS Proxy: %w", err)
 	}
-
-	log.Println("Ping was successful!")
 
 	return nil
 }
