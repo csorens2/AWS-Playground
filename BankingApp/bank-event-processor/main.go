@@ -17,6 +17,12 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 )
 
+type ServerInfo struct {
+	Version   string `json:"version"`
+	Hostname  string `json:"hostname"`
+	CurrentDB string `json:"currentDb"`
+}
+
 func testingHandler(ctx context.Context, event json.RawMessage) error {
 	log.Println("Hello World from the Lambda!")
 
@@ -34,11 +40,11 @@ func testingHandler(ctx context.Context, event json.RawMessage) error {
 		return fmt.Errorf("failed to load AWS config: %w", err)
 	}
 
-	dbEndpoint := fmt.Sprintf("%s:%d", proxyEndpoint, port)
+	proxyEndpointWithPort := fmt.Sprintf("%s:%d", proxyEndpoint, port)
 
 	token, err := auth.BuildAuthToken(
 		ctx,
-		dbEndpoint,
+		proxyEndpointWithPort,
 		cfg.Region,
 		databaseUser,
 		cfg.Credentials)
@@ -46,8 +52,8 @@ func testingHandler(ctx context.Context, event json.RawMessage) error {
 		return fmt.Errorf("failed to generate auth token: %w", err)
 	}
 
-	dsn := fmt.Sprintf("%s:%s@tcp(%s)/%s?tls=true&allowCleartextPasswords=true&authPlugin=mysql_native_password",
-		databaseUser, token, dbEndpoint, databaseName)
+	dsn := fmt.Sprintf("%s:%s@tcp(%s)/%s?tls=true&allowCleartextPasswords=true",
+		databaseUser, token, proxyEndpointWithPort, databaseName)
 
 	//"%s:%s@tcp(%s)/%s?tls=true&allowCleartextPasswords=true&authPlugin=mysql_native_password"
 
@@ -57,13 +63,17 @@ func testingHandler(ctx context.Context, event json.RawMessage) error {
 	}
 	defer db.Close()
 
-	conn, err := net.DialTimeout("tcp", proxyEndpoint+":3306", 5*time.Second)
+	conn, err := net.DialTimeout("tcp", proxyEndpointWithPort, 5*time.Second)
 	if err != nil {
 		log.Printf("TCP dial test failed: %v", err)
 	}
 	if conn != nil {
 		conn.Close()
-		log.Println("TCP dial to proxy:3306 succeeded")
+		log.Println("TCP dial to proxy succeeded")
+	}
+
+	if err := db.Ping(); err != nil {
+		//log.Print("Something went wrong here")
 	}
 
 	if err := db.PingContext(ctx); err != nil {

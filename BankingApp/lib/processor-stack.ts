@@ -18,6 +18,8 @@ export class BankingAppProcessorStack extends cdk.Stack {
         super(scope, id, props)
 
         const mySqlPort = 3306
+        const transactionLedgerDBName = 'transactions'
+        const transactionLedgerAdminName = 'admin' // DO NOT TOUCH
 
         const processorVPC = new ec2.Vpc(this, 'ProcessorVPC', {
             subnetConfiguration: [
@@ -36,15 +38,13 @@ export class BankingAppProcessorStack extends cdk.Stack {
             ]
         })
 
-        const transactionLedgerDBName = 'transactionDB'
-        const transactionLedgerCredentialName = 'dbadmin'
         const transactionLedgerDatabase = new rds.DatabaseCluster(this, 'TransactionLedger', {
             engine: rds.DatabaseClusterEngine.auroraMysql({
                 version: rds.AuroraMysqlEngineVersion.VER_3_12_0,
             }),
             vpc: processorVPC,
             vpcSubnets: {
-                subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS
+                subnetType: ec2.SubnetType.PUBLIC // TODO: Switch to Isolated when development is done
             },
             removalPolicy: cdk.RemovalPolicy.DESTROY,
             writer: rds.ClusterInstance.serverlessV2('writer'),
@@ -53,10 +53,8 @@ export class BankingAppProcessorStack extends cdk.Stack {
             })],
 
             defaultDatabaseName: transactionLedgerDBName,
-            credentials: rds.Credentials.fromGeneratedSecret(transactionLedgerCredentialName, {
-
-            }),
-
+            credentials: rds.Credentials.fromUsername(transactionLedgerAdminName), // DO NOT TOUCH
+            cloudwatchLogsExports: ["audit", "error", "general", "slowquery"],
         });
 
         const transactionLedgerProxy = new rds.DatabaseProxy(this, 'TransactionLedgerProxy', {
@@ -65,9 +63,8 @@ export class BankingAppProcessorStack extends cdk.Stack {
             vpcSubnets: {
                 subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS
             },
-
             iamAuth: true,
-            secrets: [transactionLedgerDatabase.secret!],
+            secrets: [transactionLedgerDatabase.secret!], // DO NOT TOUCH
             clientPasswordAuthType: rds.ClientPasswordAuthType.MYSQL_NATIVE_PASSWORD,
             debugLogging: true,
         })
@@ -81,21 +78,17 @@ export class BankingAppProcessorStack extends cdk.Stack {
             environment: {
                 INITIALIZATION_SQS_NAME: props!.InitializationSQSName,
                 TRANSACTION_SQS_NAME: props!.TransactionSQSName,
-                DB_NAME: transactionLedgerDBName,
 
                 PROXY_ENDPOINT: transactionLedgerProxy.endpoint,
                 DATABASE_NAME: transactionLedgerDBName,
-                DATABASE_USER: transactionLedgerCredentialName,
+                DATABASE_USER: transactionLedgerAdminName,
             },
             //reservedConcurrentExecutions: 1,
             timeout: Duration.minutes(15),
         })
 
-        new cdk.CfnOutput(this, 'ClusterEndpoint', { value: transactionLedgerDatabase.clusterEndpoint.hostname });
-        new cdk.CfnOutput(this, 'ProxyEndpoint', { value: transactionLedgerProxy.endpoint });
-
         transactionLedgerDatabase.connections.allowFrom(transactionLedgerProxy, ec2.Port.tcp(mySqlPort))
         transactionLedgerProxy.connections.allowFrom(bankEventProcessorFunction, ec2.Port.tcp(mySqlPort))
-        transactionLedgerProxy.grantConnect(bankEventProcessorFunction.role!, transactionLedgerCredentialName)
+        transactionLedgerProxy.grantConnect(bankEventProcessorFunction.role!, transactionLedgerAdminName)
     }
 }
