@@ -7,13 +7,14 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"net"
 	"os"
-	"time"
 
+	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/feature/rds/auth"
+	"github.com/aws/aws-sdk-go-v2/service/sqs"
+	"github.com/aws/aws-sdk-go-v2/service/sqs/types"
 	_ "github.com/go-sql-driver/mysql"
 )
 
@@ -21,6 +22,83 @@ type ServerInfo struct {
 	Version   string `json:"version"`
 	Hostname  string `json:"hostname"`
 	CurrentDB string `json:"currentDb"`
+}
+
+var (
+	TransactionSQSURL    string
+	InitializationSQSURL string
+
+	SQSClient *sqs.Client
+)
+
+const (
+	TransactionSQSURLEnvVar    = "TRANSACTION_SQS_URL"
+	InitializationSQSURLEnvVar = "INITIALIZATION_SQS_URL"
+)
+
+func init() {
+	cfg, err := config.LoadDefaultConfig(context.TODO())
+	if err != nil {
+		log.Fatalf("unable to load SDK config: %v", err)
+	}
+
+	loadEnvVars()
+	SQSClient = sqs.NewFromConfig(cfg)
+}
+
+func loadEnvVars() {
+	var success bool
+
+	TransactionSQSURL, success = os.LookupEnv(TransactionSQSURLEnvVar)
+	if !success {
+		log.Fatalf("env var %s not set", TransactionSQSURLEnvVar)
+	}
+
+	InitializationSQSURL, success = os.LookupEnv(InitializationSQSURLEnvVar)
+	if !success {
+		log.Fatalf("env var %s not set", InitializationSQSURLEnvVar)
+	}
+
+	log.Println(TransactionSQSURL)
+	log.Println(InitializationSQSURL)
+}
+
+func handler(ctx context.Context, event events.SQSEvent) error {
+
+	_ = `
+		CREATE TABLE IF NOT EXISTS ledger(
+			timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			credit_account VARCHAR(20) NOT NULL,
+			debit_account VARCHAR(20) NOT NULL,
+			amount DECIMAL(20,2) NOT NULL
+		)
+	`
+	_ = `
+		INSERT INTO ledger (credit_account, debit_account, amount)
+		VALUES ('111', '222', 55.50)
+	`
+
+	return nil
+}
+
+func testingSQS(ctx context.Context, event json.RawMessage) error {
+
+	input := &sqs.GetQueueAttributesInput{
+		QueueUrl: &TransactionSQSURL,
+		AttributeNames: []types.QueueAttributeName{
+			types.QueueAttributeNameApproximateNumberOfMessages,
+		},
+	}
+
+	result, err := SQSClient.GetQueueAttributes(ctx, input)
+	if err != nil {
+		log.Printf("Failed to get queue attributes: %v", err)
+		return nil
+	}
+
+	log.Printf("ApproximateNumberOfMessages: %s\n", result.Attributes[string(types.QueueAttributeNameApproximateNumberOfMessages)])
+
+	return nil
 }
 
 func testingHandler(ctx context.Context, event json.RawMessage) error {
@@ -55,26 +133,11 @@ func testingHandler(ctx context.Context, event json.RawMessage) error {
 	dsn := fmt.Sprintf("%s:%s@tcp(%s)/%s?tls=true&allowCleartextPasswords=true",
 		databaseUser, token, proxyEndpointWithPort, databaseName)
 
-	//"%s:%s@tcp(%s)/%s?tls=true&allowCleartextPasswords=true&authPlugin=mysql_native_password"
-
 	db, err := sql.Open("mysql", dsn)
 	if err != nil {
 		return fmt.Errorf("failed to open DB connection: %w", err)
 	}
 	defer db.Close()
-
-	conn, err := net.DialTimeout("tcp", proxyEndpointWithPort, 5*time.Second)
-	if err != nil {
-		log.Printf("TCP dial test failed: %v", err)
-	}
-	if conn != nil {
-		conn.Close()
-		log.Println("TCP dial to proxy succeeded")
-	}
-
-	if err := db.Ping(); err != nil {
-		//log.Print("Something went wrong here")
-	}
 
 	if err := db.PingContext(ctx); err != nil {
 		log.Printf("Ping failed. Error type: %T", err)
@@ -89,9 +152,18 @@ func testingHandler(ctx context.Context, event json.RawMessage) error {
 		return fmt.Errorf("failed to ping RDS Proxy: %w", err)
 	}
 
+	tableStatement := ""
+
+	_, err = db.Exec(tableStatement)
+	if err != nil {
+		return fmt.Errorf("failed to create ledger table: %w", err)
+	}
+
+	//result.RowsAffected()
+
 	return nil
 }
 
 func main() {
-	lambda.Start(testingHandler)
+	lambda.Start(testingSQS)
 }

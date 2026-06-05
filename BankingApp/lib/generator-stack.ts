@@ -8,8 +8,8 @@ import * as targets from "aws-cdk-lib/aws-events-targets";
 
 export class BankingAppGeneratorStack extends cdk.Stack {
 
-    public TransactionSQSName: string
-    public InitializationSQSName: string
+    public TransactionSQS: sqs.Queue
+    public InitializationSQS: sqs.Queue
 
     constructor(scope: Construct, id: string, props?: cdk.StackProps) {
         super(scope, id, props)
@@ -29,7 +29,7 @@ export class BankingAppGeneratorStack extends cdk.Stack {
                 TRANSACTION_EVENT_DETAIL_TYPE: transactionEventDetailType,
                 EVENTBRIDGE_NAME: bankEventBus.eventBusName
             },
-            timeout: Duration.minutes(15)
+            timeout: Duration.minutes(5)
         })
         bankEventBus.grantPutEventsTo(generatorFunction)
 
@@ -55,8 +55,8 @@ export class BankingAppGeneratorStack extends cdk.Stack {
                 maxReceiveCount: 3
             }
         })
-        this.TransactionSQSName = transactionSQS.queueName
-        this.InitializationSQSName = initializationSQS.queueName
+        this.TransactionSQS= transactionSQS
+        this.InitializationSQS = initializationSQS
 
         const busToInitializationRule = new events.Rule(this, 'BusToInitializationRule', {
             eventBus: bankEventBus,

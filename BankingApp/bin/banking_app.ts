@@ -7,13 +7,12 @@ import {BankingAppGeneratorStack} from "../lib/generator-stack";
 const app = new cdk.App();
 
 
-//const generatorStack = new BankingAppGeneratorStack(app, 'BankingAppGeneratorStack')
+const generatorStack = new BankingAppGeneratorStack(app, 'BankingAppGeneratorStack')
 new BankingAppProcessorStack(app, 'BankingAppProcessorStack', {
-    //TransactionSQSName: generatorStack.TransactionSQSName,
-    //InitializationSQSName: generatorStack.InitializationSQSName
-    TransactionSQSName: "Temp",
-    InitializationSQSName: "Temp"
+    TransactionSQS: generatorStack.TransactionSQS,
+    InitializationSQS: generatorStack.InitializationSQS
 })
+
 
 /*
 new BankingAppStack(app, 'BankingAppStack', {});
