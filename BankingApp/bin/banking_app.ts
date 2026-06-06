@@ -1,22 +1,17 @@
 #!/usr/bin/env node
 import * as cdk from 'aws-cdk-lib/core';
-import { BankingAppStack } from '../lib/banking_app-stack';
 import {BankingAppProcessorStack} from "../lib/processor-stack";
 import {BankingAppGeneratorStack} from "../lib/generator-stack";
 
 const app = new cdk.App();
 
-
 const generatorStack = new BankingAppGeneratorStack(app, 'BankingAppGeneratorStack')
-new BankingAppProcessorStack(app, 'BankingAppProcessorStack', {
+const processorStack = new BankingAppProcessorStack(app, 'BankingAppProcessorStack', {
     TransactionSQS: generatorStack.TransactionSQS,
     InitializationSQS: generatorStack.InitializationSQS
 })
 
-
-/*
-new BankingAppStack(app, 'BankingAppStack', {});
-*/
+processorStack.addDependency(generatorStack)
 
 /* If you don't specify 'env', this stack will be environment-agnostic.
    * Account/Region-dependent features and context lookups will not work,

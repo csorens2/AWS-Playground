@@ -5,7 +5,8 @@ import * as rds from "aws-cdk-lib/aws-rds";
 import * as lambda from "aws-cdk-lib/aws-lambda";
 import {Duration} from "aws-cdk-lib/core";
 import * as sqs from 'aws-cdk-lib/aws-sqs'
-import * as eventsources from 'aws-cdk-lib/aws-lambda-event-sources';
+import * as scheduler from 'aws-cdk-lib/aws-scheduler';
+import * as targets from 'aws-cdk-lib/aws-scheduler-targets'
 
 interface ProcessorProps extends cdk.StackProps {
     TransactionSQS: sqs.Queue
@@ -91,18 +92,17 @@ export class BankingAppProcessorStack extends cdk.Stack {
         transactionLedgerProxy.connections.allowFrom(bankEventProcessorFunction, ec2.Port.tcp(mySqlPort))
         transactionLedgerProxy.grantConnect(bankEventProcessorFunction.role!, transactionLedgerAdminName)
 
-        bankEventProcessorFunction.addEventSource(
-            new eventsources.SqsEventSource(props!.InitializationSQS,{
-                batchSize: 1,
+        const processorTarget = new targets.LambdaInvoke(bankEventProcessorFunction, {
+            retryAttempts: 3,
+        })
 
-            })
-        )
-        bankEventProcessorFunction.addEventSource(
-            new eventsources.SqsEventSource(props!.TransactionSQS, {
-                batchSize: 1,
-            })
-        )
+        new scheduler.Schedule(this, 'ProcessorSchedule', {
+            schedule: scheduler.ScheduleExpression.rate(cdk.Duration.minutes(1)),
+            target: processorTarget
+        })
 
+        props!.TransactionSQS!.grantConsumeMessages(bankEventProcessorFunction)
+        props!.InitializationSQS.grantConsumeMessages(bankEventProcessorFunction)
 
         new cdk.CfnOutput(this, 'ClusterEndpoint', {
             value: transactionLedgerDatabase.clusterEndpoint.hostname,

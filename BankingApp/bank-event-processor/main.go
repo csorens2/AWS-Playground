@@ -42,18 +42,13 @@ func init() {
 		log.Fatalf("unable to load SDK config: %v", err)
 	}
 
-	loadEnvVars()
 	SQSClient = sqs.NewFromConfig(cfg)
-}
 
-func loadEnvVars() {
 	var success bool
-
 	TransactionSQSURL, success = os.LookupEnv(TransactionSQSURLEnvVar)
 	if !success {
 		log.Fatalf("env var %s not set", TransactionSQSURLEnvVar)
 	}
-
 	InitializationSQSURL, success = os.LookupEnv(InitializationSQSURLEnvVar)
 	if !success {
 		log.Fatalf("env var %s not set", InitializationSQSURLEnvVar)
@@ -63,7 +58,93 @@ func loadEnvVars() {
 	log.Println(InitializationSQSURL)
 }
 
-func handler(ctx context.Context, event events.SQSEvent) error {
+func main() {
+	lambda.Start(scheduledHandler)
+}
+
+func scheduledHandler(ctx context.Context) error {
+	log.Println("Hello World from the Lambda!")
+
+	initializationMessages, err := getQueueMessages(ctx, InitializationSQSURL)
+	if err != nil {
+		return err
+	}
+
+	transactionMessages, err := getQueueMessages(ctx, TransactionSQSURL)
+	if err != nil {
+		return err
+	}
+
+	log.Printf("Num initialization messages: %d\n", len(initializationMessages.Messages))
+	log.Printf("Num transaction messages: %d\n", len(transactionMessages.Messages))
+
+	err = processInitializations(ctx, initializationMessages)
+	if err != nil {
+		return err
+	}
+	err = processTransactions(ctx, transactionMessages)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func getQueueMessages(ctx context.Context, queueURL string) (*sqs.ReceiveMessageOutput, error) {
+	result, err := SQSClient.ReceiveMessage(ctx, &sqs.ReceiveMessageInput{
+		QueueUrl:            &queueURL,
+		MaxNumberOfMessages: 10,
+		MessageAttributeNames: []string{
+			".*",
+		},
+		MessageSystemAttributeNames: []types.MessageSystemAttributeName{
+			types.MessageSystemAttributeNameAll,
+		},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to poll '%s' for messages: %v", queueURL, err)
+	}
+
+	return result, nil
+}
+
+func processInitializations(ctx context.Context, output *sqs.ReceiveMessageOutput) error {
+	log.Println("Processing initializations")
+
+	for _, nextMessage := range output.Messages {
+		log.Printf("Processing Message '%s'\n", *nextMessage.MessageId)
+
+		_, err := SQSClient.DeleteMessage(ctx, &sqs.DeleteMessageInput{
+			QueueUrl:      &InitializationSQSURL,
+			ReceiptHandle: nextMessage.ReceiptHandle,
+		})
+		if err != nil {
+			return fmt.Errorf("failed to delete message '%s' from '%s': %v", *nextMessage.ReceiptHandle, InitializationSQSURL, err)
+		}
+	}
+
+	return nil
+}
+
+func processTransactions(ctx context.Context, output *sqs.ReceiveMessageOutput) error {
+	log.Println("Processing transactions")
+
+	for _, nextMessage := range output.Messages {
+		log.Printf("Processing Message '%s'\n", *nextMessage.MessageId)
+
+		_, err := SQSClient.DeleteMessage(ctx, &sqs.DeleteMessageInput{
+			QueueUrl:      &TransactionSQSURL,
+			ReceiptHandle: nextMessage.ReceiptHandle,
+		})
+		if err != nil {
+			return fmt.Errorf("failed to delete message '%s' from '%s': %v", *nextMessage.ReceiptHandle, InitializationSQSURL, err)
+		}
+	}
+
+	return nil
+}
+
+func SQLStatements(ctx context.Context, event events.SQSEvent) error {
 
 	_ = `
 		CREATE TABLE IF NOT EXISTS ledger(
@@ -81,27 +162,7 @@ func handler(ctx context.Context, event events.SQSEvent) error {
 	return nil
 }
 
-func testingSQS(ctx context.Context, event json.RawMessage) error {
-
-	input := &sqs.GetQueueAttributesInput{
-		QueueUrl: &TransactionSQSURL,
-		AttributeNames: []types.QueueAttributeName{
-			types.QueueAttributeNameApproximateNumberOfMessages,
-		},
-	}
-
-	result, err := SQSClient.GetQueueAttributes(ctx, input)
-	if err != nil {
-		log.Printf("Failed to get queue attributes: %v", err)
-		return nil
-	}
-
-	log.Printf("ApproximateNumberOfMessages: %s\n", result.Attributes[string(types.QueueAttributeNameApproximateNumberOfMessages)])
-
-	return nil
-}
-
-func testingHandler(ctx context.Context, event json.RawMessage) error {
+func proxyTesting(ctx context.Context, event json.RawMessage) error {
 	log.Println("Hello World from the Lambda!")
 
 	proxyEndpoint := os.Getenv("PROXY_ENDPOINT")
@@ -159,11 +220,5 @@ func testingHandler(ctx context.Context, event json.RawMessage) error {
 		return fmt.Errorf("failed to create ledger table: %w", err)
 	}
 
-	//result.RowsAffected()
-
 	return nil
-}
-
-func main() {
-	lambda.Start(testingSQS)
 }
