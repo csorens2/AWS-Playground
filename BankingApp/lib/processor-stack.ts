@@ -7,6 +7,7 @@ import {Duration} from "aws-cdk-lib/core";
 import * as sqs from 'aws-cdk-lib/aws-sqs'
 import * as scheduler from 'aws-cdk-lib/aws-scheduler';
 import * as targets from 'aws-cdk-lib/aws-scheduler-targets'
+import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 
 interface ProcessorProps extends cdk.StackProps {
     TransactionSQS: sqs.Queue
@@ -69,6 +70,16 @@ export class BankingAppProcessorStack extends cdk.Stack {
             debugLogging: true,
         })
 
+        const accountStatusDatabase = new dynamodb.TableV2(this, 'AccountStatus', {
+            partitionKey: { name: 'account', type: dynamodb.AttributeType.STRING },
+            tableName: 'account-status',
+            removalPolicy: cdk.RemovalPolicy.DESTROY,
+        })
+
+        const accountStatusGatewayEndpoint = processorVPC.addGatewayEndpoint('AccountStatusGatewayEndpoint', {
+            service: ec2.GatewayVpcEndpointAwsService.DYNAMODB
+        })
+
         const bankEventProcessorFunction = new lambda.DockerImageFunction(this, 'BankEventProcessor', {
             vpc: processorVPC,
             vpcSubnets: {
@@ -82,9 +93,13 @@ export class BankingAppProcessorStack extends cdk.Stack {
                 PROXY_ENDPOINT: transactionLedgerProxy.endpoint,
                 DATABASE_NAME: transactionLedgerDBName,
                 DATABASE_USER: transactionLedgerAdminName,
+
+                ACCOUNT_STATUS_TABLE_NAME: accountStatusDatabase.tableName
             },
-            reservedConcurrentExecutions: 1,
             timeout: Duration.minutes(5),
+
+            // Cost saving testing
+            architecture: lambda.Architecture.ARM_64
         })
         transactionLedgerDatabase.connections.allowDefaultPortFrom(ec2.Peer.ipv4("24.148.32.162/32"))
 
@@ -97,12 +112,15 @@ export class BankingAppProcessorStack extends cdk.Stack {
         })
 
         new scheduler.Schedule(this, 'ProcessorSchedule', {
-            schedule: scheduler.ScheduleExpression.rate(cdk.Duration.minutes(1)),
+            schedule: scheduler.ScheduleExpression.rate(cdk.Duration.minutes(3)),
             target: processorTarget
         })
 
         props!.TransactionSQS!.grantConsumeMessages(bankEventProcessorFunction)
         props!.InitializationSQS.grantConsumeMessages(bankEventProcessorFunction)
+
+        accountStatusDatabase.grantReadWriteData(bankEventProcessorFunction)
+
 
         new cdk.CfnOutput(this, 'ClusterEndpoint', {
             value: transactionLedgerDatabase.clusterEndpoint.hostname,

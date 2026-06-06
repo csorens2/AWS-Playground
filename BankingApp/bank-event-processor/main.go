@@ -13,8 +13,9 @@ import (
 	"github.com/aws/aws-lambda-go/lambda"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/feature/rds/auth"
+	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
-	"github.com/aws/aws-sdk-go-v2/service/sqs/types"
+	sqstypes "github.com/aws/aws-sdk-go-v2/service/sqs/types"
 	_ "github.com/go-sql-driver/mysql"
 )
 
@@ -24,16 +25,33 @@ type ServerInfo struct {
 	CurrentDB string `json:"currentDb"`
 }
 
+type InitializationMessage struct {
+	Details InitializationDetails `json:"detail"`
+}
+type InitializationDetails struct {
+	AccountNumber string  `json:"AccountNumber"`
+	Amount        float64 `json:"Amount"`
+}
+
+type TransactionMessage struct {
+	DebitAccountNumber  string  `json:"DebitAccountNumber"`
+	CreditAccountNumber string  `json:"CreditAccountNumber"`
+	Amount              float64 `json:"Amount"`
+}
+
 var (
-	TransactionSQSURL    string
-	InitializationSQSURL string
+	TransactionSQSURL      string
+	InitializationSQSURL   string
+	AccountStatusTableName string
 
 	SQSClient *sqs.Client
+	DDBClient *dynamodb.Client
 )
 
 const (
-	TransactionSQSURLEnvVar    = "TRANSACTION_SQS_URL"
-	InitializationSQSURLEnvVar = "INITIALIZATION_SQS_URL"
+	TransactionSQSURLEnvVar      = "TRANSACTION_SQS_URL"
+	InitializationSQSURLEnvVar   = "INITIALIZATION_SQS_URL"
+	AccountStatusTableNameEnvVar = "ACCOUNT_STATUS_TABLE_NAME"
 )
 
 func init() {
@@ -43,6 +61,7 @@ func init() {
 	}
 
 	SQSClient = sqs.NewFromConfig(cfg)
+	DDBClient = dynamodb.NewFromConfig(cfg)
 
 	var success bool
 	TransactionSQSURL, success = os.LookupEnv(TransactionSQSURLEnvVar)
@@ -53,9 +72,10 @@ func init() {
 	if !success {
 		log.Fatalf("env var %s not set", InitializationSQSURLEnvVar)
 	}
-
-	log.Println(TransactionSQSURL)
-	log.Println(InitializationSQSURL)
+	AccountStatusTableName, success = os.LookupEnv(AccountStatusTableNameEnvVar)
+	if !success {
+		log.Fatalf("env var %s not set", AccountStatusTableNameEnvVar)
+	}
 }
 
 func main() {
@@ -87,6 +107,30 @@ func scheduledHandler(ctx context.Context) error {
 		return err
 	}
 
+	/*
+		err = pingAccountStatusTable(ctx)
+		if err != nil {
+			return err
+		}
+
+	*/
+
+	return nil
+}
+
+func pingAccountStatusTable(ctx context.Context) error {
+	log.Println("Attempting DDBTable Connection")
+
+	_, err := DDBClient.DescribeTable(ctx, &dynamodb.DescribeTableInput{
+		TableName: &AccountStatusTableName,
+	})
+
+	if err != nil {
+		return fmt.Errorf("unable to connect to DDBTable: %v", err)
+	}
+
+	log.Println("DDBTable ping successful")
+
 	return nil
 }
 
@@ -97,8 +141,8 @@ func getQueueMessages(ctx context.Context, queueURL string) (*sqs.ReceiveMessage
 		MessageAttributeNames: []string{
 			".*",
 		},
-		MessageSystemAttributeNames: []types.MessageSystemAttributeName{
-			types.MessageSystemAttributeNameAll,
+		MessageSystemAttributeNames: []sqstypes.MessageSystemAttributeName{
+			sqstypes.MessageSystemAttributeNameAll,
 		},
 	})
 	if err != nil {
@@ -113,8 +157,16 @@ func processInitializations(ctx context.Context, output *sqs.ReceiveMessageOutpu
 
 	for _, nextMessage := range output.Messages {
 		log.Printf("Processing Message '%s'\n", *nextMessage.MessageId)
+		log.Printf("Message details: '%s'\n", *nextMessage.Body)
 
-		_, err := SQSClient.DeleteMessage(ctx, &sqs.DeleteMessageInput{
+		messageBytes := []byte(*nextMessage.Body)
+		var message InitializationMessage
+		err := json.Unmarshal(messageBytes, &message)
+		if err != nil {
+			return fmt.Errorf("failed to unmarshal message: %v", err)
+		}
+
+		_, err = SQSClient.DeleteMessage(ctx, &sqs.DeleteMessageInput{
 			QueueUrl:      &InitializationSQSURL,
 			ReceiptHandle: nextMessage.ReceiptHandle,
 		})
@@ -150,12 +202,12 @@ func SQLStatements(ctx context.Context, event events.SQSEvent) error {
 		CREATE TABLE IF NOT EXISTS ledger(
 			timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 			credit_account VARCHAR(20) NOT NULL,
-			debit_account VARCHAR(20) NOT NULL,
+			debit_account VARCHAR(20),
 			amount DECIMAL(20,2) NOT NULL
 		)
 	`
 	_ = `
-		INSERT INTO ledger (credit_account, debit_account, amount)
+		INSERT INTO ledger (credit_account_num, debit_account_num, amount)
 		VALUES ('111', '222', 55.50)
 	`
 
