@@ -197,15 +197,6 @@ func processTransactions(ctx context.Context, output *sqs.ReceiveMessageOutput) 
 }
 
 func SQLStatements(ctx context.Context, event events.SQSEvent) error {
-
-	_ = `
-		CREATE TABLE IF NOT EXISTS ledger(
-			timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-			credit_account VARCHAR(20) NOT NULL,
-			debit_account VARCHAR(20),
-			amount DECIMAL(20,2) NOT NULL
-		)
-	`
 	_ = `
 		INSERT INTO ledger (credit_account_num, debit_account_num, amount)
 		VALUES ('111', '222', 55.50)

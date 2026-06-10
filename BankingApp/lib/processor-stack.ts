@@ -20,6 +20,7 @@ export class BankingAppProcessorStack extends cdk.Stack {
 
         const transactionLedgerDBName = 'transactions'
         const transactionLedgerAdminName = 'admin' // DO NOT TOUCH
+        const transactionLedgerTableName = 'ledger'
 
         const processorVPC = new ec2.Vpc(this, 'ProcessorVPC', {
             subnetConfiguration: [
@@ -89,13 +90,18 @@ export class BankingAppProcessorStack extends cdk.Stack {
             code: lambda.DockerImageCode.fromImageAsset('./database-setup'),
             environment: {
                 DATABASE_SECRET_NAME: transactionLedgerDatabase.secret!.secretName,
+                DATABASE_ENDPOINT_HOSTNAME: transactionLedgerDatabase.instanceEndpoint.hostname,
+                DATABASE_ENDPOINT_PORT: transactionLedgerDatabase.instanceEndpoint.port.toString(),
+                DATABASE_NAME: transactionLedgerDBName,
+                LEDGER_TABLE_NAME: transactionLedgerTableName
             },
             timeout: Duration.minutes(5),
         })
         transactionLedgerDatabase.secret!.grantRead(databaseSetupFunction.role!)
-
-        transactionLedgerDatabase.connections.allowDefaultPortFrom(ec2.Peer.ipv4("24.148.32.162/32"))
-        transactionLedgerDatabase.grantConnect(bankEventProcessorFunction.role!, transactionLedgerAdminName)
+        transactionLedgerDatabase.connections.allowFrom(databaseSetupFunction, ec2.Port.tcp(transactionLedgerDatabase.instanceEndpoint.port))
+        transactionLedgerDatabase.connections.allowFrom(bankEventProcessorFunction, ec2.Port.tcp(transactionLedgerDatabase.instanceEndpoint.port))
+        transactionLedgerDatabase.connections.allowDefaultPortFrom(ec2.Peer.ipv4("24.148.32.162/32")) // TODO: Remove after building
+        accountStatusDatabase.grantReadWriteData(bankEventProcessorFunction)
 
         const processorTarget = new targets.LambdaInvoke(bankEventProcessorFunction, {
             retryAttempts: 3,
@@ -108,20 +114,6 @@ export class BankingAppProcessorStack extends cdk.Stack {
 
         props!.TransactionSQS!.grantConsumeMessages(bankEventProcessorFunction)
         props!.InitializationSQS.grantConsumeMessages(bankEventProcessorFunction)
-
-        accountStatusDatabase.grantReadWriteData(bankEventProcessorFunction)
-
-
-        new cdk.CfnOutput(this, 'ClusterEndpoint', {
-            value: transactionLedgerDatabase.instanceEndpoint.hostname,
-            description: 'Aurora Cluster Endpoint (use this as host)',
-        });
-
-        new cdk.CfnOutput(this, 'Port', {
-            value: transactionLedgerDatabase.instanceEndpoint.port.toString(),
-            description: 'Database port (3306 for MySQL)',
-        });
-
     }
 }
 
