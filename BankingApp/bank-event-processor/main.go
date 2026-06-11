@@ -8,12 +8,14 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/feature/rds/auth"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
+	"github.com/aws/aws-sdk-go-v2/service/secretsmanager"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	sqstypes "github.com/aws/aws-sdk-go-v2/service/sqs/types"
 	_ "github.com/go-sql-driver/mysql"
@@ -40,18 +42,27 @@ type TransactionMessage struct {
 }
 
 var (
-	TransactionSQSURL      string
-	InitializationSQSURL   string
-	AccountStatusTableName string
+	TransactionSQSURL          string
+	InitializationSQSURL       string
+	AccountStatusTableName     string
+	TransactionLedgerTableName string
 
-	SQSClient *sqs.Client
-	DDBClient *dynamodb.Client
+	SQSClient               *sqs.Client
+	TransactionLedgerClient *sql.DB
+	AccountStatusClient     *dynamodb.Client
 )
 
 const (
-	TransactionSQSURLEnvVar      = "TRANSACTION_SQS_URL"
-	InitializationSQSURLEnvVar   = "INITIALIZATION_SQS_URL"
+	TransactionSQSURLEnvVar    = "TRANSACTION_SQS_URL"
+	InitializationSQSURLEnvVar = "INITIALIZATION_SQS_URL"
+
 	AccountStatusTableNameEnvVar = "ACCOUNT_STATUS_TABLE_NAME"
+
+	LedgerDatabaseSecretNameEnvVar = "LEDGER_DATABASE_SECRET_NAME"
+	LedgerDatabaseHostnameEnvVar   = "LEDGER_DATABASE_HOSTNAME"
+	LedgerDatabasePortEnvVar       = "LEDGER_DATABASE_PORT"
+	LedgerDatabaseNameEnvVar       = "LEDGER_DATABASE_NAME"
+	LedgerTableNameEnvVar          = "LEDGER_TABLE_NAME"
 )
 
 func init() {
@@ -60,30 +71,109 @@ func init() {
 		log.Fatalf("unable to load SDK config: %v", err)
 	}
 
-	SQSClient = sqs.NewFromConfig(cfg)
-	DDBClient = dynamodb.NewFromConfig(cfg)
+	getEnvVar := func(envVarName string) string {
+		var success bool
+		envVarValue, success := os.LookupEnv(envVarName)
+		if !success {
+			log.Fatalf("env var '%s' not set", envVarName)
+		}
 
-	var success bool
-	TransactionSQSURL, success = os.LookupEnv(TransactionSQSURLEnvVar)
-	if !success {
-		log.Fatalf("env var %s not set", TransactionSQSURLEnvVar)
+		return envVarValue
 	}
-	InitializationSQSURL, success = os.LookupEnv(InitializationSQSURLEnvVar)
-	if !success {
-		log.Fatalf("env var %s not set", InitializationSQSURLEnvVar)
+
+	TransactionSQSURL = getEnvVar(TransactionSQSURLEnvVar)
+	InitializationSQSURL = getEnvVar(InitializationSQSURLEnvVar)
+
+	AccountStatusTableName = getEnvVar(AccountStatusTableNameEnvVar)
+
+	secretName := getEnvVar(LedgerDatabaseSecretNameEnvVar)
+	ledgerHostname := getEnvVar(LedgerDatabaseHostnameEnvVar)
+	ledgerPort := getEnvVar(LedgerDatabasePortEnvVar)
+	ledgerDatabaseName := getEnvVar(LedgerDatabaseNameEnvVar)
+	TransactionLedgerTableName = getEnvVar(LedgerTableNameEnvVar)
+
+	secretUsername, secretPassword, err := getLedgerDatabaseUsernameAndPassword(context.TODO(), secretName)
+	if err != nil {
+		log.Fatalf("failed to acquire transaction ledger secret username and password : %v", err)
 	}
-	AccountStatusTableName, success = os.LookupEnv(AccountStatusTableNameEnvVar)
-	if !success {
-		log.Fatalf("env var %s not set", AccountStatusTableNameEnvVar)
+
+	dsn := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?allowCleartextPasswords=true",
+		secretUsername, secretPassword, ledgerHostname, ledgerPort, ledgerDatabaseName)
+
+	TransactionLedgerClient, err = sql.Open("mysql", dsn)
+	if err != nil {
+		log.Fatalf("failed to open connection to transaction ledger database: %v", err)
 	}
+
+	SQSClient = sqs.NewFromConfig(cfg)
+	AccountStatusClient = dynamodb.NewFromConfig(cfg)
+}
+
+func getLedgerDatabaseUsernameAndPassword(ctx context.Context, secretName string) (string, string, error) {
+	cfg, err := config.LoadDefaultConfig(ctx)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to load AWS config: %w", err)
+	}
+
+	secretClient := secretsmanager.NewFromConfig(cfg)
+
+	result, err := secretClient.GetSecretValue(ctx, &secretsmanager.GetSecretValueInput{
+		SecretId: &secretName,
+	})
+	if err != nil {
+		return "", "", fmt.Errorf("failed to get secret value: %w", err)
+	}
+
+	var secretMap map[string]interface{}
+	if err = json.Unmarshal([]byte(*result.SecretString), &secretMap); err != nil {
+		return "", "", fmt.Errorf("failed to unmarshal secret string: %w", err)
+	}
+
+	userNameFieldName := "username"
+	passwordFieldName := "password"
+	failureErrorString := "failed to acquire '%s' from secret string: field not present"
+
+	username, exists := secretMap[userNameFieldName].(string)
+	if !exists {
+		return "", "", fmt.Errorf(failureErrorString, userNameFieldName)
+	}
+
+	password, exists := secretMap[passwordFieldName].(string)
+	if !exists {
+		return "", "", fmt.Errorf(failureErrorString, passwordFieldName)
+	}
+
+	return username, password, nil
 }
 
 func main() {
-	lambda.Start(scheduledHandler)
+	lambda.Start(handler)
 }
 
-func scheduledHandler(ctx context.Context) error {
+func handler(ctx context.Context) error {
 	log.Println("Hello World from the Lambda!")
+
+	log.Println("Checking if Transaction Ledger database is setup")
+	isSetup, err := isLedgerDatabaseSetup(TransactionLedgerTableName)
+	if err != nil {
+		return err
+	}
+
+	if !isSetup {
+		log.Println("Setting up transaction ledger database")
+		err = setupLedgerDatabase(TransactionLedgerTableName)
+		if err != nil {
+			return err
+		}
+		log.Println("Successfully setup transaction ledger database")
+	} else {
+		log.Println("Ledger database already setup")
+	}
+
+	for {
+
+		break
+	}
 
 	initializationMessages, err := getQueueMessages(ctx, InitializationSQSURL)
 	if err != nil {
@@ -106,14 +196,43 @@ func scheduledHandler(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	err = pingAccountStatusTable(ctx)
+	if err != nil {
+		return err
+	}
 
-	/*
-		err = pingAccountStatusTable(ctx)
-		if err != nil {
-			return err
-		}
+	return nil
+}
 
-	*/
+func isLedgerDatabaseSetup(transactionLedgerTableName string) (bool, error) {
+
+	checkStatement := fmt.Sprintf("SHOW TABLES LIKE '%s'", transactionLedgerTableName)
+
+	queryRows, err := TransactionLedgerClient.Query(checkStatement)
+	if err != nil {
+		return false, fmt.Errorf("failed to execute statement checking if transaction ledger table is present: %w", err)
+	}
+
+	rowCount := 0
+	if queryRows.Next() {
+		rowCount++
+	}
+
+	return rowCount == 1, nil
+}
+
+func setupLedgerDatabase(transactionLedgerTableName string) error {
+	var statementBuilder strings.Builder
+	statementBuilder.WriteString(fmt.Sprintf("CREATE TABLE %s(", transactionLedgerTableName))
+	statementBuilder.WriteString("timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP, ")
+	statementBuilder.WriteString("credit_account VARCHAR(20) NOT NULL, ")
+	statementBuilder.WriteString("debit_account VARCHAR(20), ")
+	statementBuilder.WriteString("amount DECIMAL(20,2) NOT NULL)")
+
+	_, err := TransactionLedgerClient.Exec(statementBuilder.String())
+	if err != nil {
+		return fmt.Errorf("failed to create ledger table: %w", err)
+	}
 
 	return nil
 }
@@ -121,7 +240,7 @@ func scheduledHandler(ctx context.Context) error {
 func pingAccountStatusTable(ctx context.Context) error {
 	log.Println("Attempting DDBTable Connection")
 
-	_, err := DDBClient.DescribeTable(ctx, &dynamodb.DescribeTableInput{
+	_, err := AccountStatusClient.DescribeTable(ctx, &dynamodb.DescribeTableInput{
 		TableName: &AccountStatusTableName,
 	})
 
@@ -205,7 +324,7 @@ func SQLStatements(ctx context.Context, event events.SQSEvent) error {
 	return nil
 }
 
-func proxyTesting(ctx context.Context, event json.RawMessage) error {
+func databasePinging(ctx context.Context, event json.RawMessage) error {
 	log.Println("Hello World from the Lambda!")
 
 	proxyEndpoint := os.Getenv("PROXY_ENDPOINT")

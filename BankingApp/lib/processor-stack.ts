@@ -12,10 +12,12 @@ import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 interface ProcessorProps extends cdk.StackProps {
     TransactionSQS: sqs.Queue
     InitializationSQS: sqs.Queue
+    ProcessorCadence: Duration
+    ProcessorTimeout: Duration
 }
 
 export class BankingAppProcessorStack extends cdk.Stack {
-    constructor(scope: Construct, id: string, props?: ProcessorProps) {
+    constructor(scope: Construct, id: string, props: ProcessorProps) {
         super(scope, id, props)
 
         const transactionLedgerDBName = 'transactions'
@@ -69,51 +71,37 @@ export class BankingAppProcessorStack extends cdk.Stack {
             },
             code: lambda.DockerImageCode.fromImageAsset('./bank-event-processor'),
             environment: {
-                INITIALIZATION_SQS_URL: props!.InitializationSQS.queueUrl,
-                TRANSACTION_SQS_URL: props!.TransactionSQS.queueUrl,
+                TRANSACTION_SQS_URL: props.TransactionSQS.queueUrl,
+                INITIALIZATION_SQS_URL: props.InitializationSQS.queueUrl,
+                ACCOUNT_STATUS_TABLE_NAME: accountStatusDatabase.tableName,
 
-                LEDGER_HOSTNAME: transactionLedgerDatabase.instanceEndpoint.hostname,
-                DATABASE_NAME: transactionLedgerDBName,
-                DATABASE_USER: transactionLedgerAdminName,
-
-                ACCOUNT_STATUS_TABLE_NAME: accountStatusDatabase.tableName
+                LEDGER_DATABASE_SECRET_NAME: transactionLedgerDatabase.secret!.secretName,
+                LEDGER_DATABASE_HOSTNAME: transactionLedgerDatabase.instanceEndpoint.hostname,
+                LEDGER_DATABASE_PORT: transactionLedgerDatabase.instanceEndpoint.port.toString(),
+                LEDGER_DATABASE_NAME: transactionLedgerDBName,
+                LEDGER_TABLE_NAME: transactionLedgerTableName,
             },
-            timeout: Duration.minutes(5),
-
+            timeout: props.ProcessorTimeout,
         })
 
-        const databaseSetupFunction = new lambda.DockerImageFunction(this, 'DatabaseSetup', {
-            vpc: processorVPC,
-            vpcSubnets: {
-                subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS,
-            },
-            code: lambda.DockerImageCode.fromImageAsset('./database-setup'),
-            environment: {
-                DATABASE_SECRET_NAME: transactionLedgerDatabase.secret!.secretName,
-                DATABASE_ENDPOINT_HOSTNAME: transactionLedgerDatabase.instanceEndpoint.hostname,
-                DATABASE_ENDPOINT_PORT: transactionLedgerDatabase.instanceEndpoint.port.toString(),
-                DATABASE_NAME: transactionLedgerDBName,
-                LEDGER_TABLE_NAME: transactionLedgerTableName
-            },
-            timeout: Duration.minutes(5),
-        })
-        transactionLedgerDatabase.secret!.grantRead(databaseSetupFunction.role!)
-        transactionLedgerDatabase.connections.allowFrom(databaseSetupFunction, ec2.Port.tcp(transactionLedgerDatabase.instanceEndpoint.port))
+        transactionLedgerDatabase.secret!.grantRead(bankEventProcessorFunction.role!)
         transactionLedgerDatabase.connections.allowFrom(bankEventProcessorFunction, ec2.Port.tcp(transactionLedgerDatabase.instanceEndpoint.port))
-        transactionLedgerDatabase.connections.allowDefaultPortFrom(ec2.Peer.ipv4("24.148.32.162/32")) // TODO: Remove after building
+        transactionLedgerDatabase.connections.allowDefaultPortFrom(ec2.Peer.ipv4("24.148.32.162/32")) // TODO: Remove me
         accountStatusDatabase.grantReadWriteData(bankEventProcessorFunction)
 
+        props.TransactionSQS.grantConsumeMessages(bankEventProcessorFunction)
+        props.InitializationSQS.grantConsumeMessages(bankEventProcessorFunction)
+
+        /*
         const processorTarget = new targets.LambdaInvoke(bankEventProcessorFunction, {
             retryAttempts: 3,
         })
 
         new scheduler.Schedule(this, 'ProcessorSchedule', {
-            schedule: scheduler.ScheduleExpression.rate(cdk.Duration.hours(1)),
+            schedule: scheduler.ScheduleExpression.rate(props.ProcessorCadence),
             target: processorTarget
         })
-
-        props!.TransactionSQS!.grantConsumeMessages(bankEventProcessorFunction)
-        props!.InitializationSQS.grantConsumeMessages(bankEventProcessorFunction)
+         */
     }
 }
 

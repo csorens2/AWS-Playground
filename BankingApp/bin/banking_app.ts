@@ -2,13 +2,22 @@
 import * as cdk from 'aws-cdk-lib/core';
 import {BankingAppProcessorStack} from "../lib/processor-stack";
 import {BankingAppGeneratorStack} from "../lib/generator-stack";
+import {Duration} from "aws-cdk-lib/core";
 
 const app = new cdk.App();
 
-const generatorStack = new BankingAppGeneratorStack(app, 'BankingAppGeneratorStack')
+const processorCadence = Duration.minutes(10)
+const processorTimeout = Duration.seconds(processorCadence.toSeconds() * 0.45)
+const sqsVisibilityTimeout = Duration.seconds(processorCadence.toSeconds() * 0.45)
+
+const generatorStack = new BankingAppGeneratorStack(app, 'BankingAppGeneratorStack', {
+    SQSVisibilityTimeout: sqsVisibilityTimeout
+})
 const processorStack = new BankingAppProcessorStack(app, 'BankingAppProcessorStack', {
     TransactionSQS: generatorStack.TransactionSQS,
-    InitializationSQS: generatorStack.InitializationSQS
+    InitializationSQS: generatorStack.InitializationSQS,
+    ProcessorCadence: processorCadence,
+    ProcessorTimeout: processorTimeout
 })
 
 processorStack.addDependency(generatorStack)

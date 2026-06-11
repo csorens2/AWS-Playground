@@ -6,12 +6,16 @@ import * as lambda from "aws-cdk-lib/aws-lambda";
 import {Duration} from "aws-cdk-lib/core";
 import * as targets from "aws-cdk-lib/aws-events-targets";
 
+interface GeneratorProps extends cdk.StackProps {
+    SQSVisibilityTimeout: Duration
+}
+
 export class BankingAppGeneratorStack extends cdk.Stack {
 
     public TransactionSQS: sqs.Queue
     public InitializationSQS: sqs.Queue
 
-    constructor(scope: Construct, id: string, props?: cdk.StackProps) {
+    constructor(scope: Construct, id: string, props: GeneratorProps) {
         super(scope, id, props)
 
         const transactionEventDetailType = "Transaction Event"
@@ -40,7 +44,7 @@ export class BankingAppGeneratorStack extends cdk.Stack {
         const transactionSQS = new sqs.Queue(this, 'TransactionQueue', {
             contentBasedDeduplication: true,
             fifo: true,
-            visibilityTimeout: Duration.minutes(5),
+            visibilityTimeout: props.SQSVisibilityTimeout,
             deadLetterQueue: {
                 queue: eventDLQ,
                 maxReceiveCount: 3
@@ -49,7 +53,7 @@ export class BankingAppGeneratorStack extends cdk.Stack {
         const initializationSQS = new sqs.Queue(this, 'InitializationQueue', {
             contentBasedDeduplication: true,
             fifo: true,
-            visibilityTimeout: Duration.minutes(5),
+            visibilityTimeout: props.SQSVisibilityTimeout,
             deadLetterQueue: {
                 queue: eventDLQ,
                 maxReceiveCount: 3
