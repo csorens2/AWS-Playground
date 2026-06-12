@@ -5,14 +5,11 @@ import * as rds from "aws-cdk-lib/aws-rds";
 import * as lambda from "aws-cdk-lib/aws-lambda";
 import {Duration} from "aws-cdk-lib/core";
 import * as sqs from 'aws-cdk-lib/aws-sqs'
-import * as scheduler from 'aws-cdk-lib/aws-scheduler';
-import * as targets from 'aws-cdk-lib/aws-scheduler-targets'
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
+import * as eventsources from 'aws-cdk-lib/aws-lambda-event-sources';
 
 interface ProcessorProps extends cdk.StackProps {
-    TransactionSQS: sqs.Queue
-    InitializationSQS: sqs.Queue
-    ProcessorCadence: Duration
+    BankEventSQS: sqs.Queue
     ProcessorTimeout: Duration
 }
 
@@ -20,9 +17,9 @@ export class BankingAppProcessorStack extends cdk.Stack {
     constructor(scope: Construct, id: string, props: ProcessorProps) {
         super(scope, id, props)
 
-        const transactionLedgerDBName = 'transactions'
-        const transactionLedgerAdminName = 'admin' // DO NOT TOUCH
-        const transactionLedgerTableName = 'ledger'
+        const ledgerDBName = 'ledger'
+        const ledgerTableName = 'ledger'
+        const ledgerAdminName = 'admin' // DO NOT TOUCH
 
         const processorVPC = new ec2.Vpc(this, 'ProcessorVPC', {
             subnetConfiguration: [
@@ -41,7 +38,7 @@ export class BankingAppProcessorStack extends cdk.Stack {
             ]
         })
 
-        const transactionLedgerDatabase = new rds.DatabaseInstance(this, 'TransactionLedger', {
+        const ledgerDatabase = new rds.DatabaseInstance(this, 'Ledger', {
             engine: rds.DatabaseInstanceEngine.mysql({
                 version: rds.MysqlEngineVersion.VER_8_4_8
             }),
@@ -49,9 +46,9 @@ export class BankingAppProcessorStack extends cdk.Stack {
             vpcSubnets: {
                 subnetType: ec2.SubnetType.PUBLIC // TODO: Change to Isolated
             },
-            credentials: rds.Credentials.fromUsername(transactionLedgerAdminName), // DO NOT TOUCH
+            credentials: rds.Credentials.fromUsername(ledgerAdminName), // DO NOT TOUCH
             removalPolicy: cdk.RemovalPolicy.DESTROY,
-            databaseName: transactionLedgerDBName
+            databaseName: ledgerDBName
         })
 
         const accountStatusDatabase = new dynamodb.TableV2(this, 'AccountStatus', {
@@ -71,37 +68,30 @@ export class BankingAppProcessorStack extends cdk.Stack {
             },
             code: lambda.DockerImageCode.fromImageAsset('./bank-event-processor'),
             environment: {
-                TRANSACTION_SQS_URL: props.TransactionSQS.queueUrl,
-                INITIALIZATION_SQS_URL: props.InitializationSQS.queueUrl,
+                BANK_EVENT_SQS_URL: props.BankEventSQS.queueUrl,
+
                 ACCOUNT_STATUS_TABLE_NAME: accountStatusDatabase.tableName,
 
-                LEDGER_DATABASE_SECRET_NAME: transactionLedgerDatabase.secret!.secretName,
-                LEDGER_DATABASE_HOSTNAME: transactionLedgerDatabase.instanceEndpoint.hostname,
-                LEDGER_DATABASE_PORT: transactionLedgerDatabase.instanceEndpoint.port.toString(),
-                LEDGER_DATABASE_NAME: transactionLedgerDBName,
-                LEDGER_TABLE_NAME: transactionLedgerTableName,
+                LEDGER_DATABASE_SECRET_NAME: ledgerDatabase.secret!.secretName,
+                LEDGER_DATABASE_HOSTNAME: ledgerDatabase.instanceEndpoint.hostname,
+                LEDGER_DATABASE_PORT: ledgerDatabase.instanceEndpoint.port.toString(),
+                LEDGER_DATABASE_NAME: ledgerDBName,
+                LEDGER_TABLE_NAME: ledgerTableName,
             },
-            timeout: props.ProcessorTimeout,
+            timeout: props.ProcessorTimeout
         })
 
-        transactionLedgerDatabase.secret!.grantRead(bankEventProcessorFunction.role!)
-        transactionLedgerDatabase.connections.allowFrom(bankEventProcessorFunction, ec2.Port.tcp(transactionLedgerDatabase.instanceEndpoint.port))
-        transactionLedgerDatabase.connections.allowDefaultPortFrom(ec2.Peer.ipv4("24.148.32.162/32")) // TODO: Remove me
+        ledgerDatabase.secret!.grantRead(bankEventProcessorFunction.role!)
+        ledgerDatabase.connections.allowFrom(bankEventProcessorFunction, ec2.Port.tcp(ledgerDatabase.instanceEndpoint.port))
+        ledgerDatabase.connections.allowDefaultPortFrom(ec2.Peer.ipv4("24.148.32.162/32")) // TODO: Remove me
         accountStatusDatabase.grantReadWriteData(bankEventProcessorFunction)
 
-        props.TransactionSQS.grantConsumeMessages(bankEventProcessorFunction)
-        props.InitializationSQS.grantConsumeMessages(bankEventProcessorFunction)
+        props.BankEventSQS.grantConsumeMessages(bankEventProcessorFunction) // TODO: Need?
 
-        /*
-        const processorTarget = new targets.LambdaInvoke(bankEventProcessorFunction, {
-            retryAttempts: 3,
-        })
-
-        new scheduler.Schedule(this, 'ProcessorSchedule', {
-            schedule: scheduler.ScheduleExpression.rate(props.ProcessorCadence),
-            target: processorTarget
-        })
-         */
+        bankEventProcessorFunction.addEventSource(new eventsources.SqsEventSource(props.BankEventSQS, {
+            batchSize: 10,
+            reportBatchItemFailures: true,
+        }));
     }
 }
 

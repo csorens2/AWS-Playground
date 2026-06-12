@@ -1,8 +1,14 @@
 import { fakerEN } from '@faker-js/faker';
-import { EventBridgeClient, PutEventsCommand } from '@aws-sdk/client-eventbridge';
 import { Context } from 'aws-lambda'
+import { SQSClient, SendMessageCommand, SendMessageCommandInput } from "@aws-sdk/client-sqs";
 
-type GenerationOrder = {
+enum EventType {
+    Deposit = "Deposit",
+    Withdrawal = "Withdrawal",
+    Transaction = "Transaction"
+}
+
+type RandomGenerationOrder = {
     num_unique_accounts: number
     starting_balance: number
     transaction_count: number
@@ -10,57 +16,56 @@ type GenerationOrder = {
 
 const accountNumberLength = 10;
 
-export const handler = async (event: GenerationOrder, context: Context) : Promise<string> => {
+export const generateRandomEvents = async (event: RandomGenerationOrder, context: Context) : Promise<string> => {
 
     console.log("Hello World from the Bank Event Generator")
 
-    const initializationEventDetailType = process.env.INITIALIZATION_EVENT_DETAIL_TYPE
-    if (initializationEventDetailType == undefined) {
-        console.log("INITIALIZATION_EVENT_DETAIL_TYPE must be set")
-        return "Failed"
-    }
-
-    const transactionEventDetailType = process.env.TRANSACTION_EVENT_DETAIL_TYPE
-    if (transactionEventDetailType == undefined) {
-        console.log("TRANSACTION_EVENT_DETAIL_TYPE must be set")
-        return "Failed"
-    }
-
-    const eventBridgeName = process.env.EVENTBRIDGE_NAME
-    const eventBridgeClient = new EventBridgeClient({})
-
     const fakerInstance = fakerEN;
+    const sqsClient = new SQSClient();
+
+    const bankEventSQSURL = process.env.BANK_EVENT_SQS_URL
+    if (bankEventSQSURL === undefined) {
+        console.error(`Env var BANK_EVENT_SQS_URL must be set`)
+        return "failed"
+    }
 
     const accountNumbersSet = new Set<string>();
     while (accountNumbersSet.size < event.num_unique_accounts) {
         accountNumbersSet.add(fakerInstance.finance.accountNumber(accountNumberLength))
     }
 
+    const messageGroupId = "message-group-id"
+    const eventTypeAttributeName = "EventType"
+    const eventTypeAttributeDataType = "String"
     for (const accountNumber of accountNumbersSet) {
-        const nextInitialization = {
-            AccountNumber: accountNumber,
-            Amount: event.starting_balance
-        }
-        const command = new PutEventsCommand({
-            Entries: [
-                {
-                    EventBusName: eventBridgeName,
-                    Source: context.functionName,
-                    DetailType:  initializationEventDetailType,
-                    Detail: JSON.stringify(nextInitialization),
+
+        const initialDepositCommand = new SendMessageCommand({
+            QueueUrl: bankEventSQSURL,
+            MessageBody: JSON.stringify({
+                AccountNumber: accountNumber,
+                Amount: event.starting_balance
+            }),
+            MessageGroupId: messageGroupId,
+            MessageAttributes: {
+                [eventTypeAttributeName]: {
+                    DataType: eventTypeAttributeDataType,
+                    StringValue: EventType.Deposit
                 }
-            ]
+            }
         });
 
         try {
-            await eventBridgeClient.send(command)
-            console.log('Initialization PutEvent succeeded');
+            await sqsClient.send(initialDepositCommand)
+            console.log('Deposit event succeeded');
         } catch (error) {
-            console.error('Initialization PutEvent failed:', error);
+            console.error('Deposit event failed:', error);
             throw error;
         }
     }
 
+    return ""
+
+    /*
     const accountNumbersArray = Array.from(accountNumbersSet)
     const randomAccountNumber = (): string => accountNumbersArray[Math.floor(Math.random() * accountNumbersArray.length)]
 
@@ -71,32 +76,8 @@ export const handler = async (event: GenerationOrder, context: Context) : Promis
             debitAccountNumber = randomAccountNumber();
             creditAccountNumber = randomAccountNumber();
         } while (debitAccountNumber == creditAccountNumber)
-
-        const nextTransaction = {
-            DebitAccountNumber: debitAccountNumber,
-            CreditAccountNumber: creditAccountNumber,
-            Amount: Number(fakerInstance.finance.amount( {min: 1, max: event.starting_balance})),
-        }
-
-        const command = new PutEventsCommand({
-            Entries: [
-                {
-                    EventBusName: eventBridgeName,
-                    Source: context.functionName,
-                    DetailType: transactionEventDetailType,
-                    Detail: JSON.stringify(nextTransaction),
-                },
-            ],
-        });
-
-        try {
-            await eventBridgeClient.send(command)
-            console.log('Transaction PutEvent succeeded:');
-        } catch (error) {
-            console.error('Transaction PutEvent failed:', error);
-            throw error;
-        }
     }
 
     return 'Complete'
+     */
 }

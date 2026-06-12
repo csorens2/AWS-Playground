@@ -16,46 +16,24 @@ import (
 	"github.com/aws/aws-sdk-go-v2/feature/rds/auth"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/secretsmanager"
-	"github.com/aws/aws-sdk-go-v2/service/sqs"
-	sqstypes "github.com/aws/aws-sdk-go-v2/service/sqs/types"
+	_ "github.com/aws/aws-sdk-go-v2/service/sqs"
 	_ "github.com/go-sql-driver/mysql"
 )
 
-type ServerInfo struct {
-	Version   string `json:"version"`
-	Hostname  string `json:"hostname"`
-	CurrentDB string `json:"currentDb"`
-}
-
-type InitializationMessage struct {
-	Details InitializationDetails `json:"detail"`
-}
-type InitializationDetails struct {
+type DepositMessage struct {
 	AccountNumber string  `json:"AccountNumber"`
 	Amount        float64 `json:"Amount"`
 }
 
-type TransactionMessage struct {
-	DebitAccountNumber  string  `json:"DebitAccountNumber"`
-	CreditAccountNumber string  `json:"CreditAccountNumber"`
-	Amount              float64 `json:"Amount"`
-}
-
 var (
-	TransactionSQSURL          string
-	InitializationSQSURL       string
 	AccountStatusTableName     string
 	TransactionLedgerTableName string
 
-	SQSClient               *sqs.Client
 	TransactionLedgerClient *sql.DB
 	AccountStatusClient     *dynamodb.Client
 )
 
 const (
-	TransactionSQSURLEnvVar    = "TRANSACTION_SQS_URL"
-	InitializationSQSURLEnvVar = "INITIALIZATION_SQS_URL"
-
 	AccountStatusTableNameEnvVar = "ACCOUNT_STATUS_TABLE_NAME"
 
 	LedgerDatabaseSecretNameEnvVar = "LEDGER_DATABASE_SECRET_NAME"
@@ -63,6 +41,11 @@ const (
 	LedgerDatabasePortEnvVar       = "LEDGER_DATABASE_PORT"
 	LedgerDatabaseNameEnvVar       = "LEDGER_DATABASE_NAME"
 	LedgerTableNameEnvVar          = "LEDGER_TABLE_NAME"
+)
+
+const (
+	EventTypeAttribute    = "EventType"
+	DepositEventTypeValue = "Deposit"
 )
 
 func init() {
@@ -80,9 +63,6 @@ func init() {
 
 		return envVarValue
 	}
-
-	TransactionSQSURL = getEnvVar(TransactionSQSURLEnvVar)
-	InitializationSQSURL = getEnvVar(InitializationSQSURLEnvVar)
 
 	AccountStatusTableName = getEnvVar(AccountStatusTableNameEnvVar)
 
@@ -105,7 +85,6 @@ func init() {
 		log.Fatalf("failed to open connection to transaction ledger database: %v", err)
 	}
 
-	SQSClient = sqs.NewFromConfig(cfg)
 	AccountStatusClient = dynamodb.NewFromConfig(cfg)
 }
 
@@ -147,7 +126,22 @@ func getLedgerDatabaseUsernameAndPassword(ctx context.Context, secretName string
 }
 
 func main() {
-	lambda.Start(handler)
+	lambda.Start(ESMHandler)
+}
+
+func ESMHandler(ctx context.Context, event events.SQSEvent) (map[string]interface{}, error) {
+	log.Println("Hello from ESM Handler")
+
+	var batchItemFailures map[string]interface{}
+
+	for _, event := range event.Records {
+		log.Printf("Processing message '%s'", event.MessageId)
+		eventType := event.Attributes[EventTypeAttribute]
+		log.Printf("EventType: %s", eventType)
+		log.Printf("Body: %s", event.Body)
+	}
+
+	return batchItemFailures, nil
 }
 
 func handler(ctx context.Context) error {
@@ -175,27 +169,6 @@ func handler(ctx context.Context) error {
 		break
 	}
 
-	initializationMessages, err := getQueueMessages(ctx, InitializationSQSURL)
-	if err != nil {
-		return err
-	}
-
-	transactionMessages, err := getQueueMessages(ctx, TransactionSQSURL)
-	if err != nil {
-		return err
-	}
-
-	log.Printf("Num initialization messages: %d\n", len(initializationMessages.Messages))
-	log.Printf("Num transaction messages: %d\n", len(transactionMessages.Messages))
-
-	err = processInitializations(ctx, initializationMessages)
-	if err != nil {
-		return err
-	}
-	err = processTransactions(ctx, transactionMessages)
-	if err != nil {
-		return err
-	}
 	err = pingAccountStatusTable(ctx)
 	if err != nil {
 		return err
@@ -249,68 +222,6 @@ func pingAccountStatusTable(ctx context.Context) error {
 	}
 
 	log.Println("DDBTable ping successful")
-
-	return nil
-}
-
-func getQueueMessages(ctx context.Context, queueURL string) (*sqs.ReceiveMessageOutput, error) {
-	result, err := SQSClient.ReceiveMessage(ctx, &sqs.ReceiveMessageInput{
-		QueueUrl:            &queueURL,
-		MaxNumberOfMessages: 10,
-		MessageAttributeNames: []string{
-			".*",
-		},
-		MessageSystemAttributeNames: []sqstypes.MessageSystemAttributeName{
-			sqstypes.MessageSystemAttributeNameAll,
-		},
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to poll '%s' for messages: %v", queueURL, err)
-	}
-
-	return result, nil
-}
-
-func processInitializations(ctx context.Context, output *sqs.ReceiveMessageOutput) error {
-	log.Println("Processing initializations")
-
-	for _, nextMessage := range output.Messages {
-		log.Printf("Processing Message '%s'\n", *nextMessage.MessageId)
-		log.Printf("Message details: '%s'\n", *nextMessage.Body)
-
-		messageBytes := []byte(*nextMessage.Body)
-		var message InitializationMessage
-		err := json.Unmarshal(messageBytes, &message)
-		if err != nil {
-			return fmt.Errorf("failed to unmarshal message: %v", err)
-		}
-
-		_, err = SQSClient.DeleteMessage(ctx, &sqs.DeleteMessageInput{
-			QueueUrl:      &InitializationSQSURL,
-			ReceiptHandle: nextMessage.ReceiptHandle,
-		})
-		if err != nil {
-			return fmt.Errorf("failed to delete message '%s' from '%s': %v", *nextMessage.ReceiptHandle, InitializationSQSURL, err)
-		}
-	}
-
-	return nil
-}
-
-func processTransactions(ctx context.Context, output *sqs.ReceiveMessageOutput) error {
-	log.Println("Processing transactions")
-
-	for _, nextMessage := range output.Messages {
-		log.Printf("Processing Message '%s'\n", *nextMessage.MessageId)
-
-		_, err := SQSClient.DeleteMessage(ctx, &sqs.DeleteMessageInput{
-			QueueUrl:      &TransactionSQSURL,
-			ReceiptHandle: nextMessage.ReceiptHandle,
-		})
-		if err != nil {
-			return fmt.Errorf("failed to delete message '%s' from '%s': %v", *nextMessage.ReceiptHandle, InitializationSQSURL, err)
-		}
-	}
 
 	return nil
 }

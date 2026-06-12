@@ -6,20 +6,15 @@ import {Duration} from "aws-cdk-lib/core";
 
 const app = new cdk.App();
 
-const processorCadence = Duration.minutes(10)
-const processorTimeout = Duration.seconds(processorCadence.toSeconds() * 0.45)
-const sqsVisibilityTimeout = Duration.seconds(processorCadence.toSeconds() * 0.45)
+const timeout = Duration.minutes(3)
 
 const generatorStack = new BankingAppGeneratorStack(app, 'BankingAppGeneratorStack', {
-    SQSVisibilityTimeout: sqsVisibilityTimeout
+    BankEventSQSTimeout: timeout
 })
 const processorStack = new BankingAppProcessorStack(app, 'BankingAppProcessorStack', {
-    TransactionSQS: generatorStack.TransactionSQS,
-    InitializationSQS: generatorStack.InitializationSQS,
-    ProcessorCadence: processorCadence,
-    ProcessorTimeout: processorTimeout
+    BankEventSQS: generatorStack.BankEventSQS,
+    ProcessorTimeout: timeout
 })
-
 processorStack.addDependency(generatorStack)
 
 /* If you don't specify 'env', this stack will be environment-agnostic.
