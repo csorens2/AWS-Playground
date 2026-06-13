@@ -24,7 +24,7 @@ export class BankingAppGeneratorStack extends cdk.Stack {
             fifo: true,
             deadLetterQueue: {
                 queue: bankEventDLQ,
-                maxReceiveCount: 3
+                maxReceiveCount: 1
             },
             visibilityTimeout: Duration.seconds(props.BankEventSQSTimeout.toSeconds() * 6)
         })

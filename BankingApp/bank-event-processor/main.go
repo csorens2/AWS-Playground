@@ -12,18 +12,31 @@ import (
 
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
 	"github.com/aws/aws-sdk-go-v2/feature/rds/auth"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
+	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	"github.com/aws/aws-sdk-go-v2/service/secretsmanager"
 	_ "github.com/aws/aws-sdk-go-v2/service/sqs"
 	_ "github.com/go-sql-driver/mysql"
 )
 
-type DepositMessage struct {
+type DepositMessageBody struct {
 	AccountNumber string  `json:"AccountNumber"`
 	Amount        float64 `json:"Amount"`
 }
+
+type AccountStatusEntry struct {
+	AccountNumber string  `dynamodbav:"account_number"`
+	Amount        float64 `dynamodbav:"amount"`
+}
+
+const (
+	AccountStatusAccountNumberField = "account_number"
+	AccountStatusAmountField        = "amount"
+)
 
 var (
 	AccountStatusTableName     string
@@ -132,16 +145,82 @@ func main() {
 func ESMHandler(ctx context.Context, event events.SQSEvent) (map[string]interface{}, error) {
 	log.Println("Hello from ESM Handler")
 
-	var batchItemFailures map[string]interface{}
-
-	for _, event := range event.Records {
-		log.Printf("Processing message '%s'", event.MessageId)
-		eventType := event.Attributes[EventTypeAttribute]
-		log.Printf("EventType: %s", eventType)
-		log.Printf("Body: %s", event.Body)
+	var batchItemFailures []map[string]interface{}
+	addToBIF := func(messageId string) {
+		batchItemFailures = append(batchItemFailures, map[string]interface{}{
+			"itemIdentifier": messageId,
+		})
 	}
 
-	return batchItemFailures, nil
+	for _, event := range event.Records {
+		log.Printf("Processing message '%s'\n", event.MessageId)
+
+		eventType := event.MessageAttributes[EventTypeAttribute].StringValue
+		if *eventType == DepositEventTypeValue {
+			err := handleDeposit(ctx, event)
+			if err != nil {
+				log.Printf("failed to handle deposit: %v", err)
+				addToBIF(event.MessageId)
+			}
+		} else {
+			log.Printf("unknown EventType '%s'", *eventType)
+			addToBIF(event.MessageId)
+		}
+
+		log.Println("Finished processing message")
+	}
+
+	sqsBatchResponse := map[string]interface{}{
+		"batchItemFailures": batchItemFailures,
+	}
+	return sqsBatchResponse, nil
+}
+
+func handleDeposit(ctx context.Context, message events.SQSMessage) error {
+
+	var depositBody DepositMessageBody
+	err := json.Unmarshal([]byte(message.Body), &depositBody)
+	if err != nil {
+		return fmt.Errorf("failed to unmarshal deposit message body: %w", err)
+	}
+
+	// Check if the account is already present
+	key := map[string]types.AttributeValue{
+		AccountStatusAccountNumberField: &types.AttributeValueMemberS{Value: depositBody.AccountNumber},
+	}
+
+	input := &dynamodb.GetItemInput{
+		TableName:            &AccountStatusTableName,
+		Key:                  key,
+		ProjectionExpression: aws.String(AccountStatusAmountField),
+	}
+
+	resp, err := AccountStatusClient.GetItem(ctx, input)
+	if err != nil {
+		return fmt.Errorf("unable to check if account status table already has an account; %w", err)
+	}
+
+	if len(resp.Item) > 0 {
+		return fmt.Errorf("failed to process deposit: account already exists")
+	}
+
+	// Now add the account to the status table
+
+	item, err := attributevalue.MarshalMap(AccountStatusEntry{AccountNumber: depositBody.AccountNumber, Amount: depositBody.Amount})
+	if err != nil {
+		return fmt.Errorf("failed to marshal item map: %w", err)
+	}
+
+	_, err = AccountStatusClient.PutItem(ctx, &dynamodb.PutItemInput{
+		TableName: &AccountStatusTableName,
+		Item:      item,
+	})
+
+	if err != nil {
+		return fmt.Errorf("failed to put account status entry in table: %w", err)
+	}
+
+	return nil
 }
 
 func handler(ctx context.Context) error {

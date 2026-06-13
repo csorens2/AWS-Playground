@@ -52,8 +52,8 @@ export class BankingAppProcessorStack extends cdk.Stack {
         })
 
         const accountStatusDatabase = new dynamodb.TableV2(this, 'AccountStatus', {
-            partitionKey: { name: 'account', type: dynamodb.AttributeType.STRING },
-            tableName: 'account-status',
+            partitionKey: { name: 'account_number', type: dynamodb.AttributeType.STRING },
+            tableName: 'AccountStatus',
             removalPolicy: cdk.RemovalPolicy.DESTROY,
         })
 
