@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -15,7 +14,6 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
-	"github.com/aws/aws-sdk-go-v2/feature/rds/auth"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	"github.com/aws/aws-sdk-go-v2/service/secretsmanager"
@@ -24,6 +22,11 @@ import (
 )
 
 type DepositMessageBody struct {
+	AccountNumber string  `json:"AccountNumber"`
+	Amount        float64 `json:"Amount"`
+}
+
+type WithdrawalMessageBody struct {
 	AccountNumber string  `json:"AccountNumber"`
 	Amount        float64 `json:"Amount"`
 }
@@ -57,8 +60,13 @@ const (
 )
 
 const (
-	EventTypeAttribute    = "EventType"
-	DepositEventTypeValue = "Deposit"
+	EventTypeAttribute       = "EventType"
+	DepositEventTypeValue    = "Deposit"
+	WithdrawalEventTypeValue = "Withdrawal"
+)
+
+const (
+	EmptyAccountNumber = "0000000000"
 )
 
 func init() {
@@ -145,6 +153,11 @@ func main() {
 func ESMHandler(ctx context.Context, event events.SQSEvent) (map[string]interface{}, error) {
 	log.Println("Hello from ESM Handler")
 
+	err := setupLedger()
+	if err != nil {
+		return nil, fmt.Errorf("failed to setup ledger database: %w", err)
+	}
+
 	var batchItemFailures []map[string]interface{}
 	addToBIF := func(messageId string) {
 		batchItemFailures = append(batchItemFailures, map[string]interface{}{
@@ -160,6 +173,12 @@ func ESMHandler(ctx context.Context, event events.SQSEvent) (map[string]interfac
 			err := handleDeposit(ctx, event)
 			if err != nil {
 				log.Printf("failed to handle deposit: %v", err)
+				addToBIF(event.MessageId)
+			}
+		} else if *eventType == WithdrawalEventTypeValue {
+			err := handleWithdrawal(ctx, event)
+			if err != nil {
+				log.Printf("failed to handle withdrawal: %v", err)
 				addToBIF(event.MessageId)
 			}
 		} else {
@@ -184,7 +203,8 @@ func handleDeposit(ctx context.Context, message events.SQSMessage) error {
 		return fmt.Errorf("failed to unmarshal deposit message body: %w", err)
 	}
 
-	// Check if the account is already present
+	log.Printf("Handling deposit for: '%s' Amount: %f \n", depositBody.AccountNumber, depositBody.Amount)
+
 	key := map[string]types.AttributeValue{
 		AccountStatusAccountNumberField: &types.AttributeValueMemberS{Value: depositBody.AccountNumber},
 	}
@@ -197,14 +217,12 @@ func handleDeposit(ctx context.Context, message events.SQSMessage) error {
 
 	resp, err := AccountStatusClient.GetItem(ctx, input)
 	if err != nil {
-		return fmt.Errorf("unable to check if account status table already has an account; %w", err)
+		return fmt.Errorf("unable to check if account status table already has an account: %w", err)
 	}
 
 	if len(resp.Item) > 0 {
-		return fmt.Errorf("failed to process deposit: account already exists")
+		return fmt.Errorf("failed to process deposit: account '%s' already exists", depositBody.AccountNumber)
 	}
-
-	// Now add the account to the status table
 
 	item, err := attributevalue.MarshalMap(AccountStatusEntry{AccountNumber: depositBody.AccountNumber, Amount: depositBody.Amount})
 	if err != nil {
@@ -220,12 +238,88 @@ func handleDeposit(ctx context.Context, message events.SQSMessage) error {
 		return fmt.Errorf("failed to put account status entry in table: %w", err)
 	}
 
+	// And the entry to the ledger
+	var ledgerStatementBuilder strings.Builder
+	ledgerStatementBuilder.WriteString(fmt.Sprintf("INSERT INTO %s (credit_account, debit_account, amount) ", TransactionLedgerTableName))
+	ledgerStatementBuilder.WriteString(fmt.Sprintf("VALUES ('%s', '%s', %f)", depositBody.AccountNumber, EmptyAccountNumber, depositBody.Amount))
+
+	_, err = TransactionLedgerClient.Exec(ledgerStatementBuilder.String())
+	if err != nil {
+		return fmt.Errorf("failed to add deposit to ledger: %w", err)
+	}
+
 	return nil
 }
 
-func handler(ctx context.Context) error {
-	log.Println("Hello World from the Lambda!")
+func handleWithdrawal(ctx context.Context, message events.SQSMessage) error {
+	var withdrawalBody WithdrawalMessageBody
+	err := json.Unmarshal([]byte(message.Body), &withdrawalBody)
+	if err != nil {
+		return fmt.Errorf("failed to unmarshal withdrawal message body: %w", err)
+	}
 
+	log.Printf("Handling withdrawal for: '%s' Amount: %f \n", withdrawalBody.AccountNumber, withdrawalBody.Amount)
+
+	key := map[string]types.AttributeValue{
+		AccountStatusAccountNumberField: &types.AttributeValueMemberS{Value: withdrawalBody.AccountNumber},
+	}
+
+	input := &dynamodb.GetItemInput{
+		TableName:            &AccountStatusTableName,
+		Key:                  key,
+		ProjectionExpression: aws.String(AccountStatusAmountField),
+	}
+
+	resp, err := AccountStatusClient.GetItem(ctx, input)
+	if err != nil {
+		return fmt.Errorf("unable to check if account status table already has an account: %w", err)
+	}
+
+	if len(resp.Item) == 0 {
+		return fmt.Errorf("failed to process withdrawal: account '%s' does not exist", withdrawalBody.AccountNumber)
+	}
+
+	var accountStatusEntry AccountStatusEntry
+	err = attributevalue.UnmarshalMap(resp.Item, &accountStatusEntry)
+	if err != nil {
+		return fmt.Errorf("failed to unmarshal account status: %w", err)
+	}
+
+	if withdrawalBody.Amount > accountStatusEntry.Amount {
+		return fmt.Errorf("failed to withdraw '%f' from account '%s' with funds '%f': insufficient funds",
+			withdrawalBody.Amount,
+			accountStatusEntry.AccountNumber,
+			accountStatusEntry.Amount)
+	}
+
+	newAmount := accountStatusEntry.Amount - withdrawalBody.Amount
+	item, err := attributevalue.MarshalMap(AccountStatusEntry{AccountNumber: withdrawalBody.AccountNumber, Amount: newAmount})
+	if err != nil {
+		return fmt.Errorf("failed to marshal item map: %w", err)
+	}
+
+	_, err = AccountStatusClient.PutItem(ctx, &dynamodb.PutItemInput{
+		TableName: &AccountStatusTableName,
+		Item:      item,
+	})
+
+	if err != nil {
+		return fmt.Errorf("failed to put account status entry in table: %w", err)
+	}
+
+	var ledgerStatementBuilder strings.Builder
+	ledgerStatementBuilder.WriteString(fmt.Sprintf("INSERT INTO %s (credit_account, debit_account, amount) ", TransactionLedgerTableName))
+	ledgerStatementBuilder.WriteString(fmt.Sprintf("VALUES ('%s', '%s', %f)", EmptyAccountNumber, withdrawalBody.AccountNumber, withdrawalBody.Amount))
+
+	_, err = TransactionLedgerClient.Exec(ledgerStatementBuilder.String())
+	if err != nil {
+		return fmt.Errorf("failed to add withdrawal to ledger: %w", err)
+	}
+
+	return nil
+}
+
+func setupLedger() error {
 	log.Println("Checking if Transaction Ledger database is setup")
 	isSetup, err := isLedgerDatabaseSetup(TransactionLedgerTableName)
 	if err != nil {
@@ -241,16 +335,6 @@ func handler(ctx context.Context) error {
 		log.Println("Successfully setup transaction ledger database")
 	} else {
 		log.Println("Ledger database already setup")
-	}
-
-	for {
-
-		break
-	}
-
-	err = pingAccountStatusTable(ctx)
-	if err != nil {
-		return err
 	}
 
 	return nil
@@ -282,92 +366,6 @@ func setupLedgerDatabase(transactionLedgerTableName string) error {
 	statementBuilder.WriteString("amount DECIMAL(20,2) NOT NULL)")
 
 	_, err := TransactionLedgerClient.Exec(statementBuilder.String())
-	if err != nil {
-		return fmt.Errorf("failed to create ledger table: %w", err)
-	}
-
-	return nil
-}
-
-func pingAccountStatusTable(ctx context.Context) error {
-	log.Println("Attempting DDBTable Connection")
-
-	_, err := AccountStatusClient.DescribeTable(ctx, &dynamodb.DescribeTableInput{
-		TableName: &AccountStatusTableName,
-	})
-
-	if err != nil {
-		return fmt.Errorf("unable to connect to DDBTable: %v", err)
-	}
-
-	log.Println("DDBTable ping successful")
-
-	return nil
-}
-
-func SQLStatements(ctx context.Context, event events.SQSEvent) error {
-	_ = `
-		INSERT INTO ledger (credit_account_num, debit_account_num, amount)
-		VALUES ('111', '222', 55.50)
-	`
-
-	return nil
-}
-
-func databasePinging(ctx context.Context, event json.RawMessage) error {
-	log.Println("Hello World from the Lambda!")
-
-	proxyEndpoint := os.Getenv("PROXY_ENDPOINT")
-	port := 3306
-	databaseName := os.Getenv("DATABASE_NAME")
-	databaseUser := os.Getenv("DATABASE_USER")
-
-	if proxyEndpoint == "" || databaseName == "" || databaseUser == "" {
-		return fmt.Errorf("missing required environment variables")
-	}
-
-	cfg, err := config.LoadDefaultConfig(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to load AWS config: %w", err)
-	}
-
-	proxyEndpointWithPort := fmt.Sprintf("%s:%d", proxyEndpoint, port)
-
-	token, err := auth.BuildAuthToken(
-		ctx,
-		proxyEndpointWithPort,
-		cfg.Region,
-		databaseUser,
-		cfg.Credentials)
-	if err != nil {
-		return fmt.Errorf("failed to generate auth token: %w", err)
-	}
-
-	dsn := fmt.Sprintf("%s:%s@tcp(%s)/%s?tls=true&allowCleartextPasswords=true",
-		databaseUser, token, proxyEndpointWithPort, databaseName)
-
-	db, err := sql.Open("mysql", dsn)
-	if err != nil {
-		return fmt.Errorf("failed to open DB connection: %w", err)
-	}
-	defer db.Close()
-
-	if err := db.PingContext(ctx); err != nil {
-		log.Printf("Ping failed. Error type: %T", err)
-		log.Printf("Ping error: %+v", err) // %+v often gives more context
-		log.Printf("Ping error string: %s", err.Error())
-
-		// Optional: unwrap for wrapped errors
-		if unwrapped := errors.Unwrap(err); unwrapped != nil {
-			log.Printf("Unwrapped error: %+v", unwrapped)
-		}
-
-		return fmt.Errorf("failed to ping RDS Proxy: %w", err)
-	}
-
-	tableStatement := ""
-
-	_, err = db.Exec(tableStatement)
 	if err != nil {
 		return fmt.Errorf("failed to create ledger table: %w", err)
 	}

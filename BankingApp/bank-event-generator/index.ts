@@ -5,13 +5,11 @@ import { SQSClient, SendMessageCommand, SendMessageCommandInput } from "@aws-sdk
 enum EventType {
     Deposit = "Deposit",
     Withdrawal = "Withdrawal",
-    Transaction = "Transaction"
 }
 
 type RandomGenerationOrder = {
     num_unique_accounts: number
     starting_balance: number
-    transaction_count: number
 }
 
 const accountNumberLength = 10;
@@ -62,22 +60,30 @@ export const generateRandomEvents = async (event: RandomGenerationOrder, context
             throw error;
         }
     }
+    for (const accountNumber of accountNumbersSet) {
+        const withdrawalCommand = new SendMessageCommand({
+            QueueUrl: bankEventSQSURL,
+            MessageBody: JSON.stringify({
+                AccountNumber: accountNumber,
+                Amount: Number(fakerInstance.finance.amount({ min: 0, max: event.starting_balance}))
+            }),
+            MessageGroupId: messageGroupId,
+            MessageAttributes: {
+                [eventTypeAttributeName]: {
+                    DataType: eventTypeAttributeDataType,
+                    StringValue: EventType.Withdrawal
+                }
+            }
+        });
 
-    return ""
-
-    /*
-    const accountNumbersArray = Array.from(accountNumbersSet)
-    const randomAccountNumber = (): string => accountNumbersArray[Math.floor(Math.random() * accountNumbersArray.length)]
-
-    for(let i: number = 0; i < event.transaction_count; i++) {
-        let debitAccountNumber = ""
-        let creditAccountNumber = ""
-        do {
-            debitAccountNumber = randomAccountNumber();
-            creditAccountNumber = randomAccountNumber();
-        } while (debitAccountNumber == creditAccountNumber)
+        try {
+            await sqsClient.send(withdrawalCommand)
+            console.log('Withdrawal event succeeded');
+        } catch (error) {
+            console.error('Withdrawal event failed:', error);
+            throw error;
+        }
     }
 
-    return 'Complete'
-     */
+    return ""
 }

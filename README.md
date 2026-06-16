@@ -3,7 +3,7 @@
 ## Overview
 This repo contains a series of projects created to learn how to use the AWS CDK and other AWS technologies
 
-### Banking App (Under Construction)
+### Banking App
 
 #### Tech Stack:
 
@@ -13,7 +13,7 @@ Bank Event Generator: TypeScript
 
 Bank Event Processor: Go
 
-Transaction Ledger: Amazon Aurora MySQL
+Transaction Ledger: Amazon RDS MySQL
 
 Account Status: Amazon Dynamodb
 
