@@ -3,6 +3,14 @@
 ## Overview
 This repo contains a series of projects created to learn how to use the AWS CDK and other AWS technologies
 
+### WebAPI (Under Construction)
+
+#### Tech Stack:
+
+API: C# and Controllers
+
+![WebAPIDiagram](WebAPI/diagram/AppDiagram.png)
+
 ### Banking App
 
 #### Tech Stack:
