@@ -7,7 +7,7 @@ This repo contains a series of projects created to learn how to use the AWS CDK 
 
 #### Tech Stack:
 
-API: C# and Controllers
+API: C# and ASP.NET
 
 ![WebAPIDiagram](WebAPI/diagram/AppDiagram.png)
 
