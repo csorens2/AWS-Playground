@@ -9,6 +9,8 @@ This repo contains a series of projects created to learn how to use the AWS CDK 
 
 API: C# and ASP.NET
 
+ECS Express Mode
+
 ![WebAPIDiagram](WebAPI/diagram/AppDiagram.png)
 
 ### Banking App
