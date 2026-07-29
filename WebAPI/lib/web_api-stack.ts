@@ -1,9 +1,8 @@
 import * as cdk from 'aws-cdk-lib/core';
 import { Construct } from 'constructs';
-import * as lambda from 'aws-cdk-lib/aws-lambda';
-import * as apigateway from 'aws-cdk-lib/aws-apigateway';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as ecs from 'aws-cdk-lib/aws-ecs';
+import * as ec2 from "aws-cdk-lib/aws-ec2";
 
 import * as ecrAssets from 'aws-cdk-lib/aws-ecr-assets';
 import * as path from 'path';
@@ -11,6 +10,23 @@ import * as path from 'path';
 export class WebApiStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
+
+    const apiVPC = new ec2.Vpc(this, 'ApiVPC', {
+      subnetConfiguration: [
+        {
+          name: 'Public',
+          subnetType: ec2.SubnetType.PUBLIC
+        },
+        {
+          name: 'Private',
+          subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS
+        },
+        {
+          name: 'Isolated',
+          subnetType: ec2.SubnetType.PRIVATE_ISOLATED
+        }
+      ]
+    })
 
     const imageAsset = new ecrAssets.DockerImageAsset(this, 'MyWebApiImage', {
       directory: path.join(__dirname, '../api/MyWebApi')
@@ -35,7 +51,16 @@ export class WebApiStack extends cdk.Stack {
       ],
     });
 
+    const expressCluster = new ecs.Cluster(this, 'ExpressCluster', {
+      vpc: apiVPC
+    })
+
     const expressService = new ecs.CfnExpressGatewayService(this, 'AspNetWebApi', {
+      cluster: expressCluster.clusterName,
+      networkConfiguration: {
+        subnets: apiVPC.publicSubnets.map(s => s.subnetId)
+      },
+
       serviceName: 'aspnet-webapi',
       executionRoleArn: executionRole.roleArn,
       infrastructureRoleArn: infrastructureRole.roleArn,
