@@ -28,21 +28,16 @@ export class WebApiStack extends cdk.Stack {
       ]
     })
 
-    const imageAsset = new ecrAssets.DockerImageAsset(this, 'MyWebApiImage', {
-      directory: path.join(__dirname, '../api/MyWebApi')
-    })
-
-    const executionRole = new iam.Role(this, 'TaskExecutionRole', {
+    const ecsExecutionRole = new iam.Role(this, 'ECSExecutionRole', {
       assumedBy: new iam.ServicePrincipal('ecs-tasks.amazonaws.com'),
       managedPolicies: [
-          iam.ManagedPolicy.fromAwsManagedPolicyName(
-              'service-role/AmazonECSTaskExecutionRolePolicy'
-          )
-      ]
+        iam.ManagedPolicy.fromAwsManagedPolicyName(
+            'service-role/AmazonECSTaskExecutionRolePolicy'
+        )
+      ],
     })
-    imageAsset.repository.grantPull(executionRole);
 
-    const infrastructureRole = new iam.Role(this, 'InfrastructureRole', {
+    const ecsInfrastructureRole = new iam.Role(this, 'ECSInfrastructureRole', {
       assumedBy: new iam.ServicePrincipal('ecs.amazonaws.com'),
       managedPolicies: [
         iam.ManagedPolicy.fromAwsManagedPolicyName(
@@ -51,42 +46,46 @@ export class WebApiStack extends cdk.Stack {
       ],
     });
 
+    /*
+    const apiImageAsset = new ecrAssets.DockerImageAsset(this, 'MyWebApiImage', {
+      directory: path.join(__dirname, '../api/MyWebApi')
+    })
+    apiImageAsset.repository.grantPull(ecsExecutionRole);
+    apiImageAsset.repository.grantPull(ecsInfrastructureRole)
+     */
+
+    /*
     const expressCluster = new ecs.Cluster(this, 'ExpressCluster', {
       vpc: apiVPC
     })
 
+     */
+
+    /*
     const expressService = new ecs.CfnExpressGatewayService(this, 'AspNetWebApi', {
-      cluster: expressCluster.clusterName,
+      infrastructureRoleArn: ecsInfrastructureRole.roleArn,
+      executionRoleArn: ecsExecutionRole.roleArn,
+      primaryContainer: {
+        //image: apiImageAsset.imageUri,
+        image: "public.ecr.aws/bstraehle/rest-api:latest",
+        containerPort: 8080,
+      },
+
+
+      //cluster: expressCluster.clusterName,
+
       networkConfiguration: {
         subnets: apiVPC.publicSubnets.map(s => s.subnetId)
       },
 
-      serviceName: 'aspnet-webapi',
-      executionRoleArn: executionRole.roleArn,
-      infrastructureRoleArn: infrastructureRole.roleArn,
-
-      primaryContainer: {
-        image: imageAsset.imageUri,
-        containerPort: 8080,
-        environment: [
-            // Necessary?
-          { name: 'ASPNETCORE_ENVIRONMENT', value: 'Production' },
-        ],
-      },
-
-      healthCheckPath: '/health',
-      //cpu: '1024',
-      //memory: '2048',
-
-      scalingTarget: {
-        minTaskCount: 1,
-        maxTaskCount: 5,
-      },
     });
+
 
     new cdk.CfnOutput(this, 'ServiceUrl', {
       value: `https://${expressService.getAtt('Endpoint').toString()}`,
       description: 'URL of the ASP.NET Web API on ECS Express Mode',
     });
+
+     */
   }
 }

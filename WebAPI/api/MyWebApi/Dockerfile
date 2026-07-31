@@ -1,17 +1,15 @@
-FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
-
+ARG TARGETARCH
 COPY ["MyWebApi.csproj", "."]
-RUN dotnet restore "./MyWebApi.csproj"
-
+RUN dotnet restore -a $TARGETARCH
 COPY . .
-RUN dotnet publish "./MyWebApi.csproj" -c Release -o /app/publish /p:UseAppHost=false
+RUN dotnet publish "./MyWebApi.csproj" -a $TARGETARCH --no-restore -c Release -o /app/publish
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS final
 WORKDIR /app
-
 EXPOSE 8080
 
 COPY --from=build /app/publish .
 
-ENTRYPOINT ["dotnet", "MyWebApi.dll"]
+ENTRYPOINT ["./MyWebApi"]
