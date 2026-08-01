@@ -1,6 +1,7 @@
 import * as cdk from 'aws-cdk-lib/core';
-import { Construct } from 'constructs';
+import {Construct} from 'constructs';
 import * as iam from 'aws-cdk-lib/aws-iam';
+import {Effect} from 'aws-cdk-lib/aws-iam';
 import * as ecs from 'aws-cdk-lib/aws-ecs';
 import * as ec2 from "aws-cdk-lib/aws-ec2";
 
@@ -43,36 +44,39 @@ export class WebApiStack extends cdk.Stack {
         iam.ManagedPolicy.fromAwsManagedPolicyName(
             'service-role/AmazonECSInfrastructureRoleforExpressGatewayServices'
         ),
-      ],
+      ]
     });
+    ecsInfrastructureRole.addToPolicy(new iam.PolicyStatement({
+      effect: Effect.ALLOW,
+      actions: ['ec2:DescribeInternetGateways'],
+      resources: ['*'],
+    }))
 
-    /*
+
     const apiImageAsset = new ecrAssets.DockerImageAsset(this, 'MyWebApiImage', {
       directory: path.join(__dirname, '../api/MyWebApi')
     })
     apiImageAsset.repository.grantPull(ecsExecutionRole);
     apiImageAsset.repository.grantPull(ecsInfrastructureRole)
-     */
 
-    /*
+
+
     const expressCluster = new ecs.Cluster(this, 'ExpressCluster', {
       vpc: apiVPC
     })
 
-     */
 
-    /*
     const expressService = new ecs.CfnExpressGatewayService(this, 'AspNetWebApi', {
       infrastructureRoleArn: ecsInfrastructureRole.roleArn,
       executionRoleArn: ecsExecutionRole.roleArn,
       primaryContainer: {
-        //image: apiImageAsset.imageUri,
-        image: "public.ecr.aws/bstraehle/rest-api:latest",
+        image: apiImageAsset.imageUri,
+        //image: "public.ecr.aws/bstraehle/rest-api:latest",
         containerPort: 8080,
       },
 
 
-      //cluster: expressCluster.clusterName,
+      cluster: expressCluster.clusterName,
 
       networkConfiguration: {
         subnets: apiVPC.publicSubnets.map(s => s.subnetId)
@@ -85,7 +89,5 @@ export class WebApiStack extends cdk.Stack {
       value: `https://${expressService.getAtt('Endpoint').toString()}`,
       description: 'URL of the ASP.NET Web API on ECS Express Mode',
     });
-
-     */
   }
 }
