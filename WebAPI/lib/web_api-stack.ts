@@ -1,93 +1,54 @@
 import * as cdk from 'aws-cdk-lib/core';
 import {Construct} from 'constructs';
-import * as iam from 'aws-cdk-lib/aws-iam';
-import {Effect} from 'aws-cdk-lib/aws-iam';
 import * as ecs from 'aws-cdk-lib/aws-ecs';
 import * as ec2 from "aws-cdk-lib/aws-ec2";
+import * as ecsPatterns from 'aws-cdk-lib/aws-ecs-patterns';
+import * as ecrAssets from "aws-cdk-lib/aws-ecr-assets";
+import path from "path";
 
-import * as ecrAssets from 'aws-cdk-lib/aws-ecr-assets';
-import * as path from 'path';
 
 export class WebApiStack extends cdk.Stack {
-  constructor(scope: Construct, id: string, props?: cdk.StackProps) {
-    super(scope, id, props);
+    constructor(scope: Construct, id: string, props?: cdk.StackProps) {
+        super(scope, id, props);
 
-    const apiVPC = new ec2.Vpc(this, 'ApiVPC', {
-      subnetConfiguration: [
-        {
-          name: 'Public',
-          subnetType: ec2.SubnetType.PUBLIC
-        },
-        {
-          name: 'Private',
-          subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS
-        },
-        {
-          name: 'Isolated',
-          subnetType: ec2.SubnetType.PRIVATE_ISOLATED
-        }
-      ]
-    })
+        const apiVPC = new ec2.Vpc(this, 'ApiVPC', {
+            subnetConfiguration: [
+                {
+                    name: 'Public',
+                    subnetType: ec2.SubnetType.PUBLIC
+                },
+                {
+                    name: 'Private',
+                    subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS
+                },
+                {
+                    name: 'Isolated',
+                    subnetType: ec2.SubnetType.PRIVATE_ISOLATED
+                }
+            ]
+        })
 
-    const ecsExecutionRole = new iam.Role(this, 'ECSExecutionRole', {
-      assumedBy: new iam.ServicePrincipal('ecs-tasks.amazonaws.com'),
-      managedPolicies: [
-        iam.ManagedPolicy.fromAwsManagedPolicyName(
-            'service-role/AmazonECSTaskExecutionRolePolicy'
-        )
-      ],
-    })
+        const ecsService = new ecsPatterns.ApplicationLoadBalancedFargateService(this, 'ApiFargateService', {
+            taskImageOptions: {
+                image: ecs.ContainerImage.fromDockerImageAsset(
+                    new ecrAssets.DockerImageAsset(this, 'MyWebApiImage', {
+                        directory: path.join(__dirname, '../api/MyWebApi')
+                    })
+                ),
+                containerPort: 8080
+            },
+            publicLoadBalancer: true,
+            vpc: apiVPC,
+            circuitBreaker: {
+                enable: true,
+                rollback: true
+            },
 
-    const ecsInfrastructureRole = new iam.Role(this, 'ECSInfrastructureRole', {
-      assumedBy: new iam.ServicePrincipal('ecs.amazonaws.com'),
-      managedPolicies: [
-        iam.ManagedPolicy.fromAwsManagedPolicyName(
-            'service-role/AmazonECSInfrastructureRoleforExpressGatewayServices'
-        ),
-      ]
-    });
-    ecsInfrastructureRole.addToPolicy(new iam.PolicyStatement({
-      effect: Effect.ALLOW,
-      actions: ['ec2:DescribeInternetGateways'],
-      resources: ['*'],
-    }))
+        })
 
+        new cdk.CfnOutput(this, 'LoadbalancerDNSName', {
+            value: ecsService.loadBalancer.loadBalancerDnsName,
+        });
 
-    const apiImageAsset = new ecrAssets.DockerImageAsset(this, 'MyWebApiImage', {
-      directory: path.join(__dirname, '../api/MyWebApi')
-    })
-    apiImageAsset.repository.grantPull(ecsExecutionRole);
-    apiImageAsset.repository.grantPull(ecsInfrastructureRole)
-
-
-
-    const expressCluster = new ecs.Cluster(this, 'ExpressCluster', {
-      vpc: apiVPC
-    })
-
-
-    const expressService = new ecs.CfnExpressGatewayService(this, 'AspNetWebApi', {
-      infrastructureRoleArn: ecsInfrastructureRole.roleArn,
-      executionRoleArn: ecsExecutionRole.roleArn,
-      primaryContainer: {
-        image: apiImageAsset.imageUri,
-        //image: "public.ecr.aws/bstraehle/rest-api:latest",
-        containerPort: 8080,
-      },
-
-
-      cluster: expressCluster.clusterName,
-
-      networkConfiguration: {
-        subnets: apiVPC.publicSubnets.map(s => s.subnetId)
-      },
-
-    });
-
-
-    new cdk.CfnOutput(this, 'ServiceUrl', {
-      value: `https://${expressService.getAtt('Endpoint').toString()}`,
-      description: 'URL of the ASP.NET Web API on ECS Express Mode',
-    });
-  }
+    }
 }
