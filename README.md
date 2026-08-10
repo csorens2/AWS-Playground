@@ -3,15 +3,15 @@
 ## Overview
 This repo contains a series of projects created to learn how to use the AWS CDK and other AWS technologies
 
-### WebAPI (Under Construction)
+### Store API (Under Construction)
 
 #### Tech Stack:
 
 API: C# and ASP.NET
 
-ECS Express Mode
+Construct: ApplicationLoadBalanced Fargate Service
 
-![WebAPIDiagram](WebAPI/diagram/AppDiagram.png)
+![WebAPIDiagram](StoreAPI/diagram/AppDiagram.png)
 
 ### Banking App
 

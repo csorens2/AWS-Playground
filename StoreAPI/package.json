@@ -1,5 +1,5 @@
 {
-  "name": "web_api",
+  "name": "store_api",
   "version": "0.1.0",
   "scripts": {
     "build": "tsc",
@@ -8,17 +8,17 @@
     "cdk": "cdk"
   },
   "devDependencies": {
+    "@swc/core": "^1.15.0",
+    "@swc/jest": "^0.2.39",
     "@types/jest": "^30",
     "@types/node": "^24.10.1",
-    "aws-cdk": "2.1125.0",
     "jest": "^30",
-    "ts-jest": "^29",
-    "ts-node": "^10.9.2",
-    "typescript": "~5.9.3"
+    "aws-cdk": "2.1135.0",
+    "tsx": "^4.23.0",
+    "typescript": "~7.0.2"
   },
   "dependencies": {
-    "@aws-cdk/aws-apprunner-alpha": "^2.261.0-alpha.0",
-    "aws-cdk-lib": "^2.257.0",
+    "aws-cdk-lib": "^2.263.0",
     "constructs": "^10.5.0"
   }
 }
