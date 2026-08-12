@@ -3,6 +3,8 @@ import {Construct} from 'constructs';
 import * as ecs from 'aws-cdk-lib/aws-ecs';
 import * as ec2 from "aws-cdk-lib/aws-ec2";
 import * as ecsPatterns from 'aws-cdk-lib/aws-ecs-patterns';
+import * as ecrAssets from "aws-cdk-lib/aws-ecr-assets";
+import path from "path";
 
 export class StoreApiStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
@@ -16,8 +18,6 @@ export class StoreApiStack extends cdk.Stack {
         },
         {
           name: 'Private',
-import * as ecrAssets from "aws-cdk-lib/aws-ecr-assets";
-import path from "path";
           subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS
         },
         {
