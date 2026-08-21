@@ -4,11 +4,16 @@ import * as ecs from 'aws-cdk-lib/aws-ecs';
 import * as ec2 from "aws-cdk-lib/aws-ec2";
 import * as ecsPatterns from 'aws-cdk-lib/aws-ecs-patterns';
 import * as ecrAssets from "aws-cdk-lib/aws-ecr-assets";
+import * as rds from "aws-cdk-lib/aws-rds";
+import * as logs from 'aws-cdk-lib/aws-logs';
 import path from "path";
 
 export class StoreApiStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
+
+    const itemsDBName = 'items'
+    const itemsAdminName = 'admin' // DO NOT TOUCH
 
     const apiVPC = new ec2.Vpc(this, 'ApiVPC', {
       subnetConfiguration: [
@@ -27,14 +32,48 @@ export class StoreApiStack extends cdk.Stack {
       ]
     })
 
+    const itemsDatabase = new rds.DatabaseInstance(this, 'Ledger', {
+      engine: rds.DatabaseInstanceEngine.mysql({
+        version: rds.MysqlEngineVersion.VER_8_4_8
+      }),
+      vpc: apiVPC,
+      vpcSubnets: {
+        subnetType: ec2.SubnetType.PUBLIC
+      },
+      credentials: rds.Credentials.fromUsername(itemsAdminName), // DO NOT TOUCH
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+      databaseName: itemsDBName
+    })
+
+    const logGroup = new logs.LogGroup(this, 'ApiLogGroup', {
+      logGroupName: '/ecs/my-aspnet-api',
+      retention: logs.RetentionDays.ONE_MONTH, // adjust as needed
+      removalPolicy: cdk.RemovalPolicy.DESTROY, // or RETAIN for production
+    });
+
     const ecsService = new ecsPatterns.ApplicationLoadBalancedFargateService(this, 'ApiFargateService', {
+
       taskImageOptions: {
         image: ecs.ContainerImage.fromDockerImageAsset(
             new ecrAssets.DockerImageAsset(this, 'ApiImage', {
               directory: path.join(__dirname, '../api')
             })
         ),
-        containerPort: 8080
+        containerPort: 8080,
+        environment: {
+          databaseURL: itemsDatabase.instanceEndpoint.hostname,
+          databaseName: itemsDBName,
+          user: itemsAdminName,
+          password: itemsDatabase.secret!.secretValue.unsafeUnwrap()
+        },
+        secrets: {
+          databasePassword: ecs.Secret.fromSecretsManager(itemsDatabase.secret!, 'password'),
+        },
+        logDriver: ecs.LogDrivers.awsLogs({
+          streamPrefix: 'aspnet-api',
+          logGroup: logGroup,
+          mode: ecs.AwsLogDriverMode.NON_BLOCKING
+        })
       },
       publicLoadBalancer: true,
       vpc: apiVPC,
@@ -43,6 +82,18 @@ export class StoreApiStack extends cdk.Stack {
         rollback: true
       },
 
+
+
+    })
+
+    itemsDatabase.connections.allowDefaultPortFrom(
+        ecsService.service,
+    );
+
+    itemsDatabase.connections.allowDefaultPortFromAnyIpv4()
+
+    new cdk.CfnOutput(this, 'ItemsDatabase', {
+      value: itemsDatabase.instanceEndpoint.hostname
     })
 
     new cdk.CfnOutput(this, 'LoadbalancerDNSName', {
