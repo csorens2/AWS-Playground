@@ -6,6 +6,7 @@ import * as ecsPatterns from 'aws-cdk-lib/aws-ecs-patterns';
 import * as ecrAssets from "aws-cdk-lib/aws-ecr-assets";
 import * as rds from "aws-cdk-lib/aws-rds";
 import * as logs from 'aws-cdk-lib/aws-logs';
+import * as s3 from 'aws-cdk-lib/aws-s3';
 import path from "path";
 
 export class StoreApiStack extends cdk.Stack {
@@ -32,7 +33,7 @@ export class StoreApiStack extends cdk.Stack {
       ]
     })
 
-    const itemsDatabase = new rds.DatabaseInstance(this, 'Ledger', {
+    const itemsDatabase = new rds.DatabaseInstance(this, 'ItemsDatabase', {
       engine: rds.DatabaseInstanceEngine.mysql({
         version: rds.MysqlEngineVersion.VER_8_4_8
       }),
@@ -51,8 +52,9 @@ export class StoreApiStack extends cdk.Stack {
       removalPolicy: cdk.RemovalPolicy.DESTROY, // or RETAIN for production
     });
 
-    const ecsService = new ecsPatterns.ApplicationLoadBalancedFargateService(this, 'ApiFargateService', {
+    const itemPictureBucket = new s3.Bucket(this, 'ItemPictureBucket', {})
 
+    const ecsService = new ecsPatterns.ApplicationLoadBalancedFargateService(this, 'ApiFargateService', {
       taskImageOptions: {
         image: ecs.ContainerImage.fromDockerImageAsset(
             new ecrAssets.DockerImageAsset(this, 'ApiImage', {
@@ -61,13 +63,14 @@ export class StoreApiStack extends cdk.Stack {
         ),
         containerPort: 8080,
         environment: {
-          databaseURL: itemsDatabase.instanceEndpoint.hostname,
-          databaseName: itemsDBName,
-          user: itemsAdminName,
-          password: itemsDatabase.secret!.secretValue.unsafeUnwrap()
+          itemsDatabaseEndpoint: itemsDatabase.instanceEndpoint.hostname,
+          itemsDatabaseName: itemsDBName,
+          itemsDatabaseUser: itemsAdminName,
+
+          itemPicturesBucketName: itemPictureBucket.bucketName,
         },
         secrets: {
-          databasePassword: ecs.Secret.fromSecretsManager(itemsDatabase.secret!, 'password'),
+          itemsDatabasePassword: ecs.Secret.fromSecretsManager(itemsDatabase.secret!, 'password'),
         },
         logDriver: ecs.LogDrivers.awsLogs({
           streamPrefix: 'aspnet-api',
@@ -81,10 +84,9 @@ export class StoreApiStack extends cdk.Stack {
         enable: true,
         rollback: true
       },
-
-
-
     })
+
+    itemPictureBucket.grantReadWrite(ecsService.taskDefinition.taskRole)
 
     itemsDatabase.connections.allowDefaultPortFrom(
         ecsService.service,
@@ -92,7 +94,7 @@ export class StoreApiStack extends cdk.Stack {
 
     itemsDatabase.connections.allowDefaultPortFromAnyIpv4()
 
-    new cdk.CfnOutput(this, 'ItemsDatabase', {
+    new cdk.CfnOutput(this, 'ItemsDatabaseEndpoint', {
       value: itemsDatabase.instanceEndpoint.hostname
     })
 

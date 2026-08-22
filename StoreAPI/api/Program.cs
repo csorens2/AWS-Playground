@@ -1,7 +1,10 @@
 
+using Amazon.S3;
 using Api.Database;
+using Microsoft.AspNetCore.HttpLogging;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using System.Runtime;
 
 class API
 {
@@ -10,30 +13,47 @@ class API
         var builder = WebApplication.CreateBuilder(args);
 
         // Add services to the container.
-
-        var endpoint = Environment.GetEnvironmentVariable("databaseURL");
-        var databaseName = Environment.GetEnvironmentVariable("databaseName");
-        var userName = Environment.GetEnvironmentVariable("user");
-        var password = Environment.GetEnvironmentVariable("databasePassword");
-
-        var connectionString = $"Server={endpoint};Port=3306;Database={databaseName};User={userName};Password={password};";
-
         builder.Services.AddControllers();
         // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
         builder.Services.AddOpenApi();
         builder.Services.AddDbContext<ApiDbContext>(options =>
         {
+            var itemsDatabaseEndpoint = Environment.GetEnvironmentVariable("itemsDatabaseEndpoint");
+            var itemsDatabaseName = Environment.GetEnvironmentVariable("itemsDatabaseName");
+            var itemsDatabaseUser = Environment.GetEnvironmentVariable("itemsDatabaseUser");
+            var itemsDatabasePassword = Environment.GetEnvironmentVariable("itemsDatabasePassword");
+            var itemsDatabaseConnectionString = $"Server={itemsDatabaseEndpoint};Port=3306;Database={itemsDatabaseName};User={itemsDatabaseUser};Password={itemsDatabasePassword};";
+
             options.UseMySql(
-                connectionString,
-                ServerVersion.AutoDetect(connectionString));
+                itemsDatabaseConnectionString,
+                ServerVersion.AutoDetect(itemsDatabaseConnectionString));
+        });
+        builder.Services.Configure<ControllerSettings>(options =>
+        {
+            options.ItemPicturesBucketName = Environment.GetEnvironmentVariable("itemPicturesBucketName")!;
         });
 
+        builder.Services.AddHttpLogging(options =>
+        {
+            options.LoggingFields = HttpLoggingFields.All;
+        });
+
+        builder.Services.AddAWSService<IAmazonS3>();
+
         var app = builder.Build();
+
+        app.UseHttpLogging();
+
+        app.Use(async (context, next) =>
+        {
+            Console.WriteLine($"[{DateTime.UtcNow:O}] {context.Request.Method} {context.Request.Path} Content-Type: {context.Request.ContentType}");
+            await next();
+        });
 
         using (var scope = app.Services.CreateScope())
         {
             var dbContext = scope.ServiceProvider.GetRequiredService<ApiDbContext>();
-            dbContext.Database.EnsureCreated();   // ← the method you asked for
+            dbContext.Database.EnsureCreated();
         }
 
         // Configure the HTTP request pipeline.
