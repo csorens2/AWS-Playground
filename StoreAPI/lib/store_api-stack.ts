@@ -7,6 +7,7 @@ import * as ecrAssets from "aws-cdk-lib/aws-ecr-assets";
 import * as rds from "aws-cdk-lib/aws-rds";
 import * as logs from 'aws-cdk-lib/aws-logs';
 import * as s3 from 'aws-cdk-lib/aws-s3';
+import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import path from "path";
 
 export class StoreApiStack extends cdk.Stack {
@@ -46,6 +47,12 @@ export class StoreApiStack extends cdk.Stack {
       databaseName: itemsDBName
     })
 
+    const cartDatabase = new dynamodb.TableV2(this, 'CustomerCart', {
+      partitionKey: { name: 'CartGuid', type: dynamodb.AttributeType.STRING },
+      tableName: 'CustomerCart',
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+    })
+
     const logGroup = new logs.LogGroup(this, 'ApiLogGroup', {
       logGroupName: '/ecs/my-aspnet-api',
       retention: logs.RetentionDays.ONE_MONTH, // adjust as needed
@@ -68,6 +75,8 @@ export class StoreApiStack extends cdk.Stack {
           itemsDatabaseUser: itemsAdminName,
 
           itemPicturesBucketName: itemPictureBucket.bucketName,
+
+          DynamoDb__CartTableName: cartDatabase.tableName,
         },
         secrets: {
           itemsDatabasePassword: ecs.Secret.fromSecretsManager(itemsDatabase.secret!, 'password'),
@@ -87,6 +96,7 @@ export class StoreApiStack extends cdk.Stack {
     })
 
     itemPictureBucket.grantReadWrite(ecsService.taskDefinition.taskRole)
+    cartDatabase.grantReadWriteData(ecsService.taskDefinition.taskRole)
 
     itemsDatabase.connections.allowDefaultPortFrom(
         ecsService.service,
@@ -101,5 +111,9 @@ export class StoreApiStack extends cdk.Stack {
     new cdk.CfnOutput(this, 'LoadbalancerDNSName', {
       value: ecsService.loadBalancer.loadBalancerDnsName,
     });
+
+    new cdk.CfnOutput(this, 'Cart Table Name', {
+      value: cartDatabase.tableName,
+    })
   }
 }

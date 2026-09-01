@@ -1,4 +1,7 @@
 FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+
+#ARG CACHE_BUST=1
+
 WORKDIR /src
 ARG TARGETARCH
 COPY ["Api.csproj", "."]

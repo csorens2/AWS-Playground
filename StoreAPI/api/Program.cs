@@ -1,4 +1,6 @@
 
+using Amazon.DynamoDBv2;
+using Amazon.DynamoDBv2.DataModel;
 using Amazon.S3;
 using Api.Database;
 using Microsoft.AspNetCore.HttpLogging;
@@ -39,6 +41,24 @@ class API
         });
 
         builder.Services.AddAWSService<IAmazonS3>();
+
+        builder.Services.AddDefaultAWSOptions(builder.Configuration.GetAWSOptions());
+        builder.Services.AddAWSService<IAmazonDynamoDB>();
+        builder.Services.Configure<DynamoDbOptions>(
+            builder.Configuration.GetSection("DynamoDb"));
+        builder.Services.AddSingleton<IDynamoDBContext>(serviceProvider =>
+        {
+            var client = serviceProvider.GetRequiredService<IAmazonDynamoDB>();
+
+            return
+                new DynamoDBContextBuilder()
+                    .WithDynamoDBClient(() => client)
+                    .ConfigureContext(cfg =>
+                    {
+                        cfg.DisableFetchingTableMetadata = true;
+                    })
+                    .Build();
+        });
 
         var app = builder.Build();
 
