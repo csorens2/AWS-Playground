@@ -8,7 +8,12 @@ import * as rds from "aws-cdk-lib/aws-rds";
 import * as logs from 'aws-cdk-lib/aws-logs';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
+import * as cognito from 'aws-cdk-lib/aws-cognito';
 import path from "path";
+import {CfnOutput, Duration} from "aws-cdk-lib/core";
+import { NodejsFunction } from 'aws-cdk-lib/aws-lambda-nodejs';
+import * as lambda from 'aws-cdk-lib/aws-lambda';
+import * as iam from 'aws-cdk-lib/aws-iam';
 
 export class StoreApiStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
@@ -16,6 +21,58 @@ export class StoreApiStack extends cdk.Stack {
 
     const itemsDBName = 'items'
     const itemsAdminName = 'admin' // DO NOT TOUCH
+    const customerGroupName = 'CustomerGroup'
+
+    // Fixes circular dependency
+    //const userPoolArn =
+
+    const userPool = new cognito.UserPool(this, 'ApiUserPool', {
+      selfSignUpEnabled: true,
+      signInAliases: { email: true },
+      autoVerify: { email: true},
+      standardAttributes : {
+        email: { required: true, mutable: true}
+      },
+      passwordPolicy: {},
+      accountRecovery: cognito.AccountRecovery.EMAIL_ONLY,
+
+    })
+
+    const vendorGroup = userPool.addGroup('VendorGroup', {
+      precedence: 1
+    })
+
+    const customerGroup = userPool.addGroup(customerGroupName, {
+      precedence: 2
+    })
+
+    const cognitoClient = userPool.addClient('ApiCognitoClient', {
+      generateSecret: false,
+      authFlows: {
+        userPassword: true,
+        userSrp: true,
+      }
+    })
+
+    const addToGroupLambda = new NodejsFunction(this, 'AddNewUserToGroupLambda', {
+      entry: path.join(__dirname, "../lambda/AddNewUserToGroup.ts"),
+      handler: 'handler',
+      runtime: lambda.Runtime.NODEJS_LATEST,
+      timeout: Duration.seconds(10),
+      environment: {
+        CUSTOMER_GROUP_NAME: customerGroupName
+      },
+    })
+
+    userPool.addTrigger(
+        cognito.UserPoolOperation.POST_CONFIRMATION,
+        addToGroupLambda
+    )
+
+    addToGroupLambda.addToRolePolicy(new iam.PolicyStatement({
+      actions: ['cognito-idp:AdminAddUserToGroup'],
+      resources: [userPool.userPoolArn]
+    }))
 
     const apiVPC = new ec2.Vpc(this, 'ApiVPC', {
       subnetConfiguration: [
@@ -48,7 +105,7 @@ export class StoreApiStack extends cdk.Stack {
     })
 
     const cartDatabase = new dynamodb.TableV2(this, 'CustomerCart', {
-      partitionKey: { name: 'CartGuid', type: dynamodb.AttributeType.STRING },
+      partitionKey: { name: 'CartGuid', type: dynamodb.AttributeType.STRING }, // DO NOT TOUCH
       tableName: 'CustomerCart',
       removalPolicy: cdk.RemovalPolicy.DESTROY,
     })
@@ -115,5 +172,17 @@ export class StoreApiStack extends cdk.Stack {
     new cdk.CfnOutput(this, 'Cart Table Name', {
       value: cartDatabase.tableName,
     })
+
+    new CfnOutput(this, 'UserPoolId', {
+      value: userPool.userPoolId,
+    });
+
+    new CfnOutput(this, 'UserPoolClientId', {
+      value: cognitoClient.userPoolClientId,
+    });
+
+    new CfnOutput(this, 'CognitoEndpoint', {
+      value: `https://cognito-idp.${this.region}.amazonaws.com/`,
+    });
   }
 }
