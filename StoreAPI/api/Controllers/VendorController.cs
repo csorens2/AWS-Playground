@@ -11,6 +11,8 @@ public record NewItemRequest()
     required public string ItemName { get; set; }
     required public double ItemCost { get; set; }
 
+    required public string JWT { get; set; }
+
     required public IFormFile ItemPicture { get; set; }
 }
 
@@ -46,6 +48,13 @@ public class VendorController : ControllerBase
     [RequestSizeLimit(10_000_000)]
     public async Task<IActionResult> PostNewItem([FromForm] NewItemRequest request)
     {
+        var result = await LoginTokenValidator.VerifyJWTAsync(request.JWT, _settings.Region, _settings.UserPoolId);
+        Console.WriteLine("Result: " + result);
+
+        var resultList = LoginTokenValidator.GetCognitoGroups(request.JWT);
+        foreach (string test in resultList)
+            Console.WriteLine(test);
+        /*
         Console.WriteLine("Hello World from PostNewItem");
 
         var file = request.ItemPicture;
@@ -68,6 +77,7 @@ public class VendorController : ControllerBase
 
         _context.Add(new Item { Name = request.ItemName, Price = request.ItemCost });
         _context.SaveChanges();
+        */
 
         return Ok();
     }

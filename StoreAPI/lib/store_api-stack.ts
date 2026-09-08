@@ -23,9 +23,6 @@ export class StoreApiStack extends cdk.Stack {
     const itemsAdminName = 'admin' // DO NOT TOUCH
     const customerGroupName = 'CustomerGroup'
 
-    // Fixes circular dependency
-    //const userPoolArn =
-
     const userPool = new cognito.UserPool(this, 'ApiUserPool', {
       selfSignUpEnabled: true,
       signInAliases: { email: true },
@@ -35,14 +32,14 @@ export class StoreApiStack extends cdk.Stack {
       },
       passwordPolicy: {},
       accountRecovery: cognito.AccountRecovery.EMAIL_ONLY,
-
     })
 
     const vendorGroup = userPool.addGroup('VendorGroup', {
       precedence: 1
     })
 
-    const customerGroup = userPool.addGroup(customerGroupName, {
+    const customerGroup = userPool.addGroup('CustomerGroup', {
+      groupName: customerGroupName,
       precedence: 2
     })
 
@@ -69,10 +66,16 @@ export class StoreApiStack extends cdk.Stack {
         addToGroupLambda
     )
 
-    addToGroupLambda.addToRolePolicy(new iam.PolicyStatement({
-      actions: ['cognito-idp:AdminAddUserToGroup'],
-      resources: [userPool.userPoolArn]
-    }))
+    addToGroupLambda.role?.attachInlinePolicy(
+        new iam.Policy(this, 'AddToGroupPolicy', {
+          statements: [
+            new iam.PolicyStatement({
+              actions: ['cognito-idp:AdminAddUserToGroup'],
+              resources: [userPool.userPoolArn],
+            }),
+          ]
+        })
+    )
 
     const apiVPC = new ec2.Vpc(this, 'ApiVPC', {
       subnetConfiguration: [
@@ -134,6 +137,9 @@ export class StoreApiStack extends cdk.Stack {
           itemPicturesBucketName: itemPictureBucket.bucketName,
 
           DynamoDb__CartTableName: cartDatabase.tableName,
+
+          region: this.region,
+          userPoolId: userPool.userPoolId
         },
         secrets: {
           itemsDatabasePassword: ecs.Secret.fromSecretsManager(itemsDatabase.secret!, 'password'),

@@ -33,6 +33,8 @@ class API
         builder.Services.Configure<ControllerSettings>(options =>
         {
             options.ItemPicturesBucketName = Environment.GetEnvironmentVariable("itemPicturesBucketName")!;
+            options.Region = Environment.GetEnvironmentVariable("region")!;
+            options.UserPoolId = Environment.GetEnvironmentVariable("userPoolId")!;
         });
 
         builder.Services.AddHttpLogging(options =>
