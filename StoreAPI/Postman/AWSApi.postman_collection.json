@@ -1,0 +1,89 @@
+{
+  "info": {
+    "_postman_id": "6fd1fdf1-984e-4722-90e1-7a5351788be2",
+    "name": "AWSApi",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "21828873"
+  },
+  "item": [
+    {
+      "name": "Vendor Root Get",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{API_URL}}/Vendor",
+          "host": [
+            "{{API_URL}}"
+          ],
+          "path": [
+            "Vendor"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Vendor Add Item",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            {
+              "key": "ItemPicture",
+              "type": "file",
+              "src": [
+                "/C:/Users/csore/Desktop/screw-image.png"
+              ]
+            },
+            {
+              "key": "ItemName",
+              "value": "screw",
+              "type": "text"
+            },
+            {
+              "key": "ItemCost",
+              "value": "0.03",
+              "type": "text"
+            },
+            {
+              "key": "JWT",
+              "value": "eyJraWQiOiJDdmYzK2h6R0ZZaDkzVjROd2pqWmxDa1ZQTVlOMGlhWHZKdy96S0tUbTlNPSIsImFsZyI6IlJTMjU2In0.eyJzdWIiOiJmNDc4YzRlOC04MDgxLTcwZTEtNGQzYy0yODg0MTY5MzYxMTIiLCJjb2duaXRvOmdyb3VwcyI6WyJDdXN0b21lckdyb3VwIl0sImlzcyI6Imh0dHBzOi8vY29nbml0by1pZHAudXMtZWFzdC0xLmFtYXpvbmF3cy5jb20vdXMtZWFzdC0xX3BVR1N3Y1NMWCIsImNsaWVudF9pZCI6IjU4b2V2Zm9kNGJrbmgyOWY0b2VyZHRzNDdjIiwib3JpZ2luX2p0aSI6ImNmMDdmOTBhLWFjMDMtNGUzYS1iZjJkLTY0OGVkNTM5ODZhNyIsImV2ZW50X2lkIjoiMDJmOTI2MjAtZjEwMS00NWZiLWIwZjUtY2FkMTJmMjVjMmQ1IiwidG9rZW5fdXNlIjoiYWNjZXNzIiwic2NvcGUiOiJhd3MuY29nbml0by5zaWduaW4udXNlci5hZG1pbiIsImF1dGhfdGltZSI6MTc4ODU3ODQ3MSwiZXhwIjoxNzg4NTgyMDcxLCJpYXQiOjE3ODg1Nzg0NzIsImp0aSI6IjMyODlkODMwLWRkNDctNDQ4Ni1iMjg2LWU1OWUzYWJiMDRiMyIsInVzZXJuYW1lIjoiZjQ3OGM0ZTgtODA4MS03MGUxLTRkM2MtMjg4NDE2OTM2MTEyIn0.jJbYye0640NrH9MdfG2wUpWpyUg31SEH1FdsvvT4ShAUerp8lnZ0wllYz58MKtsxpeMwfYVnYYgHF5Eg8vmMenzsbUgkmUliz6LE4Rv2kEqWu5gI_O6fNP40V5_Zw75w1ONaJVSp6hP5WpXyOqqnVECgcXf1bWaT1hJSQ7MhdYaDS0DLUtEE7lmvcIQ1rOOku4wyWP0KxYMJJmD7fAR813Qk0Renfn438WzfMyemfx3uVFM3T3pIEtsFd999klVWAxR_3JICO-99v-fNri1nJ6L9i4IFjn52reNNsSRqKtGOJssmzOZqPW0GPTkGb5lSWIRQ5t4W_YpdFNnOqfDKrw",
+              "type": "text"
+            }
+          ]
+        },
+        "url": {
+          "raw": "{{API_URL}}/Vendor/NewItem",
+          "host": [
+            "{{API_URL}}"
+          ],
+          "path": [
+            "Vendor",
+            "NewItem"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Customer Root Get",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{API_URL}}/Customer",
+          "host": [
+            "{{API_URL}}"
+          ],
+          "path": [
+            "Customer"
+          ]
+        }
+      },
+      "response": []
+    }
+  ]
+}

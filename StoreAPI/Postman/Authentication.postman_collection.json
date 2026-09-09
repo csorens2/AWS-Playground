@@ -1,0 +1,150 @@
+{
+  "info": {
+    "_postman_id": "4c528f69-04e1-4d07-97f6-e14f0ca7cd04",
+    "name": "Authentication",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "21828873"
+  },
+  "item": [
+    {
+      "name": "Verify Account",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/x-amz-json-1.1"
+          },
+          {
+            "key": "X-Amz-Target",
+            "value": "AWSCognitoIdentityProviderService.ConfirmSignUp"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\r\n  \"ClientId\": \"{{ClientId}}\",\r\n  \"Username\": \"{{Username}}\",\r\n  \"ConfirmationCode\": \"456243\"\r\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "https://cognito-idp.{{Region}}.amazonaws.com/",
+          "protocol": "https",
+          "host": [
+            "cognito-idp",
+            "{{Region}}",
+            "amazonaws",
+            "com"
+          ],
+          "path": [
+            ""
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Create Account",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/x-amz-json-1.1"
+          },
+          {
+            "key": "X-Amz-Target",
+            "value": "AWSCognitoIdentityProviderService.SignUp"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\r\n    \"ClientId\": \"{{ClientId}}\",\r\n    \"Username\": \"{{Username}}\",\r\n    \"Password\": \"{{Password}}\",\r\n    \"UserAttributes\": [\r\n        {\"Name\": \"email\", \"Value\": \"{{Username}}\"}\r\n    ]\r\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "https://cognito-idp.{{Region}}.amazonaws.com/",
+          "protocol": "https",
+          "host": [
+            "cognito-idp",
+            "{{Region}}",
+            "amazonaws",
+            "com"
+          ],
+          "path": [
+            ""
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Login",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/x-amz-json-1.1"
+          },
+          {
+            "key": "X-Amz-Target",
+            "value": "AWSCognitoIdentityProviderService.InitiateAuth"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\r\n  \"AuthFlow\": \"USER_PASSWORD_AUTH\",\r\n  \"ClientId\": \"58oevfod4bknh29f4oerdts47c\",\r\n  \"AuthParameters\": {\r\n    \"USERNAME\": \"csorens22@gmail.com\",\r\n    \"PASSWORD\": \"password\"\r\n  }\r\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "https://cognito-idp.{{Region}}.amazonaws.com/",
+          "protocol": "https",
+          "host": [
+            "cognito-idp",
+            "{{Region}}",
+            "amazonaws",
+            "com"
+          ],
+          "path": [
+            ""
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "WellKnown",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "https://cognito-idp.{{Region}}.amazonaws.com/{{UserPoolId}}/.well-known/jwks.json",
+          "protocol": "https",
+          "host": [
+            "cognito-idp",
+            "{{Region}}",
+            "amazonaws",
+            "com"
+          ],
+          "path": [
+            "{{UserPoolId}}",
+            ".well-known",
+            "jwks.json"
+          ]
+        }
+      },
+      "response": []
+    }
+  ]
+}
